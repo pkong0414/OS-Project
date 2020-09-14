@@ -24,13 +24,21 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <sys/stat.h>
 #include <string.h>
+
+//global character count
+static int argCount = 0;
 
 int depthfirstapply( char *path, int pathfun( char *path1 ) );
 int pathfun( char *path );
-int sizepathfun( char *path );
 
 int main( int argc, char** argv ) {
+
+    argCount = argc;
+    char *path = argv[ argCount - 1 ];
+    printf( "argCount: %d\npath: %s\n", argCount, path );
+
 
     /* Invoking the solution
      * Your solution will be invoked using the following command:
@@ -50,7 +58,7 @@ int main( int argc, char** argv ) {
      * mydu: Error: Detailed error message
      */
 
-    //
+    //handles the return value of getopt
     int c;
 
     //help flag
@@ -89,7 +97,7 @@ int main( int argc, char** argv ) {
     int sflag = 0;
 
     //this will take in the arguments and process them into flags for the methods.
-    while ((c = getopt(argc, argv, "aB:bmcd:HLs")) != -1) {
+    while ((c = getopt(argc, argv, "haB:bmcd:HLs")) != -1) {
         switch (c) {
             case 'h':
                 hflag = 1;
@@ -99,7 +107,7 @@ int main( int argc, char** argv ) {
                 break;
             case 'B':
                 Bflag = 1;
-                printf( "M optarg: '%s'\n", optarg );
+                printf( "MValue: '%s'\n", optarg );
                 MValue = optarg;
                 break;
             case 'b':
@@ -113,7 +121,7 @@ int main( int argc, char** argv ) {
                 break;
             case 'd':
                 dflag = 1;
-                printf( "N optarg: '%s'\n", optarg );
+                printf( "NValue: '%s'\n", optarg );
                 NValue = optarg;
                 break;
             case 'H':
@@ -130,31 +138,63 @@ int main( int argc, char** argv ) {
         }
     }
 
-    //debugging output
-    printf ("aflag = %d, Bflag = %d MValue = %s, bflag = %d, mflag = %d, cflag = %d, dflag = %d NValue = %s,"
-            " Hflag = %d, Lflag = %d, sflag = %d\n",
-            aflag, Bflag, MValue, bflag, mflag, cflag, dflag, NValue, Hflag, Lflag, sflag);
+    //experimental section.
+    struct dirent *direntp;
+    DIR *dirp;
 
+    if ( (dirp = opendir( path ) ) == NULL ) {
+        perror ( "Failed to open directory." );
+        return 1;
+    }
+
+    while ( ( direntp = readdir( dirp ) ) != NULL ){
+        printf ( "%s\n", direntp->d_name );
+    }
+    while ( ( closedir( dirp ) == -1 ) && ( errno == EINTR ) );
+
+    printf( "\ntraversal done!\nEnding Program...\n" );
+    //depthfirstapply( path, )
+
+    //debugging output
+    /*printf ("hflag = %d, aflag = %d, Bflag = %d MValue = %s, bflag = %d, mflag = %d, cflag = %d, dflag = %d NValue = %s,"
+            " Hflag = %d, Lflag = %d, sflag = %d\n",
+            hflag, aflag, Bflag, MValue, bflag, mflag, cflag, dflag, NValue, Hflag, Lflag, sflag);
+    */
 }
 
 int depthfirstapply( char *path, int pathfun( char * path1 ) ) {
-/* 1. Write a function called depthfirstapply that has the following prototype.
- *      int depthfirstapply(char *path, int pathfun(char *path1));
- *
- *    The depthfirstapply function traverses the tree, starting at path. It applies the pathfun function to each file
- *    that it encounters in the traversal. The depthfirstapply function returns the sum of the positive return values
- *    of pathfun, or -1 if it failed to traverse any subdirectory of the directory. An example of possible pathfun is
- *    the sizepathfun function specified in the next part.
- */
+    /* 1. Write a function called depthfirstapply that has the following prototype.
+     *      int depthfirstapply(char *path, int pathfun(char *path1));
+     *
+     *    The depthfirstapply function traverses the tree, starting at path. It applies the pathfun function to each file
+     *    that it encounters in the traversal. The depthfirstapply function returns the sum of the positive return values
+     *    of pathfun, or -1 if it failed to traverse any subdirectory of the directory. An example of possible pathfun is
+     *    the sizepathfun function specified in the next part.
+     */
+    struct dirent *direntp;
+    DIR *dirp;
 
+    if ( (dirp = opendir( path[ argCount ] == NULL ) ) ) {
+        perror ( "Failed to open directory." );
+        return 1;
+    }
+
+    while ( ( direntp = readdir( dirp ) ) != NULL ){
+        printf ( "%s\n", direntp->d_name );
+    }
+    while ( ( closedir( dirp ) == -1 ) && ( errno == EINTR ) );
+    return 0;
 }
 
-int sizepathfun( char *path ) {
-/* 2. Write a function called sizepathfun that has the following prototype.
- *      int sizepathfun( char *path );
- *
- *    The sizepathfun function outputs path along other information obtained by stat for path. The sizepathfun returns
- *    the size in blocks of the file given by path or -1 if path does not correspond to an ordinary file.
- */
+int pathfun( char *path ) {
+    /* 2. Write a function called sizepathfun that has the following prototype.
+     *      int sizepathfun( char *path );
+     *
+     *    The sizepathfun function outputs path along other information obtained by stat for path. The sizepathfun returns
+     *    the size in blocks of the file given by path or -1 if path does not correspond to an ordinary file.
+     *
+     *    NOTE: in this case we'll just call it pathfun instead since exercise 1 already stated pathfun is sizepathfun.
+     */
 
+    //for this I think we'll be using stat in order to gain information.
 }
