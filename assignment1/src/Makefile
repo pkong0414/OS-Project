@@ -2,7 +2,7 @@
 
 CC = gcc
 CFLAGS = -Wall
-TARGET = btTest
+TARGET = mydu
 SRC = main.c
 OBJ = main.o
 
