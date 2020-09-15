@@ -1,5 +1,6 @@
-//testDriver.c
-//This will be used to develop and test functions going into the main src files.
+//diskusage.c
+//AUTHOR: Patrick Kong
+//DATE: 9/13/2020
 
 /* Additional Notes:
  *
@@ -67,7 +68,7 @@ int depthfirstapply( char *path, int depthCount );
 
 int main( int argc, char** argv ) {
     char *rootpath = argv[ argc - 1 ];
-    printf( "argc: %d\npath: %s\n", argc, rootpath );
+    //printf( "argc: %d\npath: %s\n", argc, rootpath );
 
 
     /* Invoking the solution
@@ -161,23 +162,21 @@ int main( int argc, char** argv ) {
                 "     * -H Human readable; print size in human readable format, for example, 1K, 234M, 2G.\n"
                 "     * -L Dereference all symbolic links. By default, you will not dereference symbolic links.\n"
                 "     * -m Same as -B 1048576.\n"
-                "     * -s Display only a total for each argument.\n\n"
-                "     * When you use perror, please print some meaningful error messages. The format for error messages should be:\n"
-                "     * mydu: Error: Detailed error message\n");
+                "     * -s Display only a total for each argument.\n\n");
         return 0;
     }
 
     //experimental section.
     if( sflag == 0 ) {
         int op = depthfirstapply(rootpath, depthCount);
-        printf( "\ntraversal done!\nEnding Program...\n" );
+        //printf( "\ntraversal done!\nEnding Program...\n" );
     }
     else if( sflag == 1 ){
         struct stat statbuf;
         int i;
         for( i = argCount; i < argc ; i++ ) {
             rootpath = argv[ i ];
-            printf( "rootpath: %s\n", rootpath);
+            //printf( "rootpath: %s\n", rootpath);
             if( lstat( rootpath, &statbuf ) != -1 ){
                 printf( "%d %s\n", statbuf.st_size, rootpath );
             } else {
@@ -237,8 +236,8 @@ int depthfirstapply( char *path, int depthCount ) {
 
     //early kicking out if depth is greater than NValue
     if( dflag == 1 && depthCount > NValue ){
-        printf( "depthCount: %d\n NValue: %d\n", depthCount, NValue );
-        printf( "jumping out of depth!\n" );
+        //printf( "depthCount: %d\n NValue: %d\n", depthCount, NValue );
+        //printf( "jumping out of depth!\n" );
         return 0;
     }
 
@@ -266,12 +265,12 @@ int depthfirstapply( char *path, int depthCount ) {
                         stat( newPath, &statbuf );
                         if((S_ISDIR(statbuf.st_mode) == 1)) {
                             if (link = (readlink(newPath, symPath, sizeof(symPath) ) ) == -1) {
-                            perror("readlink ERROR.\n");
+                                perror("readlink ERROR.\n");
                             } else {
                                 if (Bflag == 1) {
                                     //prints in values of megabytes
                                     printf("%f / $s %s is a Symbolic Link -> %s directory.\n", (float) (statbuf.st_size / atoi(MValue)),
-                                       MValue, newPath, symPath);
+                                           MValue, newPath, symPath);
                                 } else if (bflag == 1) {
                                     printf("%d b %s is a Symbolic Link -> %s directory.\n", statbuf.st_size, newPath, symPath);
                                 } else if (mflag == 1) {
@@ -469,18 +468,4 @@ int depthfirstapply( char *path, int depthCount ) {
 
 
     return 0;
-}
-
-int pathfun( char *path ) {
-    /* 2. Write a function called sizepathfun that has the following prototype.
-     *      int sizepathfun( char *path );
-     *
-     *    The sizepathfun function outputs path along other information obtained by stat for path. The sizepathfun returns
-     *    the size in blocks of the file given by path or -1 if path does not correspond to an ordinary file.
-     *
-     *    NOTE: in this case we'll just call it pathfun instead since exercise 1 already stated pathfun is sizepathfun.
-     */
-
-    //for this I think we'll be using stat in order to gain information.
-
 }

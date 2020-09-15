@@ -3,13 +3,13 @@
 CC = gcc
 CFLAGS = -Wall
 TARGET = mydu
-SRC = main.c
-OBJ = main.o
+SRC = diskusage.c
+OBJ = diskusage.o
 
 $TARGET: $(OBJ)
 	$(CC) $(CPPFLAGS) -o $(TARGET) $(OBJ)
 
-main.o        : main.c
+diskusage.o        : diskusage.c
 
 clean :
 	/bin/rm '-f' *.o $(TARGET)
