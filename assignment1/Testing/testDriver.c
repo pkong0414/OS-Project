@@ -27,17 +27,50 @@
 #include <sys/stat.h>
 #include <string.h>
 
+//macro
+#ifndef PATH_MAX
+#define PATH_MAX 255
+#endif
+
 //global character count
 static int argCount = 0;
 
-int depthfirstapply( char *path, int pathfun( char *path1 ) );
+//Global flags
+//help flag
+static int hflag = 0;
+//print all flag
+static int aflag = 0;
+//prints bytes in units of M
+//Ex: -B 1000 (prints units of bytes in 1000)
+static int Bflag = 0;
+static char *MValue = NULL;
+//prints bytes in units of bytes
+static int bflag = 0;
+//prints bytes in units of megabytes or mb
+static int mflag = 0;
+//prints the grand total
+static int cflag = 0;
+//prints only N or less total of sub-directory for the directory in the arg
+static int dflag = 0;
+static char *NValue = NULL;
+//prints size in human readable format, for example, 1K, 234M, 2G.
+static int Hflag = 0;
+//Dereference all symbolic links. By default, you will not dereference symbolic links.
+static int Lflag = 0;
+//note: in the case of 2 arguments where: -a -s is involved.
+// we can make a choice between just displaying: -s ONLY and ignore the -a
+// or
+// report an error because we cannot display all and summarized at the same time.
+static int sflag = 0;
+
+int depthfirstapply( char *path );
 int pathfun( char *path );
 
 int main( int argc, char** argv ) {
 
     argCount = argc;
-    char *path = argv[ argCount - 1 ];
-    printf( "argCount: %d\npath: %s\n", argCount, path );
+    char *rootpath = argv[ argCount - 1 ];
+    printf( "argCount: %d\npath: %s\n", argCount, rootpath );
 
 
     /* Invoking the solution
@@ -60,41 +93,6 @@ int main( int argc, char** argv ) {
 
     //handles the return value of getopt
     int c;
-
-    //help flag
-    int hflag = 0;
-
-    //print all flag
-    int aflag = 0;
-
-    //prints bytes in units of M
-    //Ex: -B 1000 (prints units of bytes in 1000)
-    int Bflag = 0;
-    char *MValue = NULL;
-    //prints bytes in units of bytes
-    int bflag = 0;
-
-    //prints bytes in units of megabytes or mb
-    int mflag = 0;
-
-    //prints the grand total
-    int cflag = 0;
-
-    //prints only N or less total of sub-directory for the directory in the arg
-    int dflag = 0;
-    char *NValue = NULL;
-
-    //prints size in human readable format, for example, 1K, 234M, 2G.
-    int Hflag = 0;
-
-    //Dereference all symbolic links. By default, you will not dereference symbolic links.
-    int Lflag = 0;
-
-    //note: in the case of 2 arguments where: -a -s is involved.
-    // we can make a choice between just displaying: -s ONLY and ignore the -a
-    // or
-    // report an error because we cannot display all and summarized at the same time.
-    int sflag = 0;
 
     //this will take in the arguments and process them into flags for the methods.
     while ((c = getopt(argc, argv, "haB:bmcd:HLs")) != -1) {
@@ -139,19 +137,7 @@ int main( int argc, char** argv ) {
     }
 
     //experimental section.
-    struct dirent *direntp;
-    DIR *dirp;
-
-    if ( (dirp = opendir( path ) ) == NULL ) {
-        perror ( "Failed to open directory." );
-        return 1;
-    }
-
-    while ( ( direntp = readdir( dirp ) ) != NULL ){
-        printf ( "%s\n", direntp->d_name );
-    }
-    while ( ( closedir( dirp ) == -1 ) && ( errno == EINTR ) );
-
+    int op = depthfirstapply( rootpath );
     printf( "\ntraversal done!\nEnding Program...\n" );
     //depthfirstapply( path, )
 
@@ -162,7 +148,7 @@ int main( int argc, char** argv ) {
     */
 }
 
-int depthfirstapply( char *path, int pathfun( char * path1 ) ) {
+int depthfirstapply( char *path ) {
     /* 1. Write a function called depthfirstapply that has the following prototype.
      *      int depthfirstapply(char *path, int pathfun(char *path1));
      *
@@ -171,18 +157,33 @@ int depthfirstapply( char *path, int pathfun( char * path1 ) ) {
      *    of pathfun, or -1 if it failed to traverse any subdirectory of the directory. An example of possible pathfun is
      *    the sizepathfun function specified in the next part.
      */
+
+    //This will work but will need to add a little bit in order to do the traversals!
     struct dirent *direntp;
     DIR *dirp;
+    struct stat statbuf;
+    char *newPath;
+    strcat( path, "/" );
 
-    if ( (dirp = opendir( path[ argCount ] == NULL ) ) ) {
+    if ( (dirp = opendir( path ) ) == NULL ) {
         perror ( "Failed to open directory." );
         return 1;
     }
 
     while ( ( direntp = readdir( dirp ) ) != NULL ){
-        printf ( "%s\n", direntp->d_name );
+        printf ( "%s%s\n", path, direntp->d_name );
+        sprintf( newPath, "%s/%s", path, direntp->d_name );
+        if( lstat( newPath, &statbuf) == -1){
+            printf( "%s is not a symbolic link.\n", newPath );
+        }
+        else{
+            printf( "%s is a symbolic link!\n", newPath );
+        }
+
     }
     while ( ( closedir( dirp ) == -1 ) && ( errno == EINTR ) );
+
+
     return 0;
 }
 
@@ -197,4 +198,9 @@ int pathfun( char *path ) {
      */
 
     //for this I think we'll be using stat in order to gain information.
+
+    //S_ISDIR(m)
+    //S_ISREG(m)
+    //S_ISLNK(m)
+    //IFMT_ISLNK(m)
 }
