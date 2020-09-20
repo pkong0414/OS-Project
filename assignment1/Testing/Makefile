@@ -1,3 +1,4 @@
+#!/bin/bash
 #this is the make file for project 3
 
 CC = gcc

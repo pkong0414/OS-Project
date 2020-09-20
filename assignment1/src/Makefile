@@ -1,7 +1,6 @@
 #this is the make file for project 3
 
 CC = gcc
-CFLAGS = -Wall
 TARGET = mydu
 SRC = diskusage.c
 OBJ = diskusage.o
