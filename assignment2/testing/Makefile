@@ -3,14 +3,14 @@
 
 CC = gcc
 TARGET = master
-SRC = main.c palin.c
-OBJ = palin.o
+SRC = main.c palim.c
+OBJ = main.o palim.o
 
 $TARGET: $(OBJ)
-	$(CC) $(CPPFLAGS) -o $(TARGET) $(OBJ)
+	$(CC) $(CFLAGS) $(OBJ) -o $(TARGET)
 
 main.o             : main.c
-palin.o            : palin.c
+palim.o            : palim.c
 
 clean :
 	/bin/rm '-f' *.o $(TARGET)
