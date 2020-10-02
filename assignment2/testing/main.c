@@ -1,12 +1,17 @@
 //main.c
 
+#include "detachandremove.h"
+#include "sharedheap.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
+#include <sys/shm.h>
 #include <stdbool.h>
 #include <string.h>
 #include "palim.h"
+#define PERM (S_IRUSR | S_IWUSR)
 
 void printhelp();
 
@@ -30,11 +35,19 @@ int main( int argc, char** argv){
                 //TODO make a printhelp function
                 break;
             case 'n':
-                nValue = atoi( optarg );
+                if( atoi(optarg) > 20 )
+                    //sorry, 20 processes max.
+                    nValue = 20;
+                else
+                    nValue = atoi( optarg );
                 printf( "nValue: $s\n", optarg);
                 break;
             case 's':
-                sValue = atoi( optarg );
+                if( atoi(optarg) > 19 )
+                    //sorry, 20 processes max.
+                    sValue = 19;
+                else
+                    sValue = atoi( optarg );
                 printf( "sValue: '%s'\n", optarg );
                 break;
             case 't':
@@ -46,6 +59,7 @@ int main( int argc, char** argv){
         }
     }
 
+    /*
     fPtr = fopen( argv[ argc - 1 ], "r");
 
     if( fPtr == NULL ){
@@ -70,6 +84,31 @@ int main( int argc, char** argv){
 
     }
 
+    fclose( FILE *fptr );
+
+    */
+
+    //shared memory section
+    int id;
+    int *sharedtotal;
+    int totalbytes = 0;
+    sharedheap sharedMem;
+
+    //shared memory grab
+    if((sharedMem.id = shmget( IPC_PRIVATE, sizeof(int), PERM)) == -1){
+        perror("Failed to create shared memory segment\n");
+        return 1;
+    } else {
+        printf("created a new memory segment\n");
+        sharedMem.sharedaddress = (char *)shmat( sharedMem.id, NULL, PERM);
+    }
+
+    if(detachandremove(sharedMem.id, sharedMem.sharedaddress) == -1){
+        perror( "failed to destroy shared memory segment\n");
+        return 1;
+    } else {
+        printf( "destroyed shared memory segment\n" );
+    }
     return 0;
 
 }
