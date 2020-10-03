@@ -15,6 +15,8 @@
 
 void printhelp();
 
+FILE *fPtr;
+
 int main( int argc, char** argv){
 
     //this value will take in a max total of child processes master will ever create.
@@ -56,6 +58,21 @@ int main( int argc, char** argv){
                 abort();
         }
     }
+
+    fPtr = fopen( argv[ argc - 1 ], "r");
+
+    if( fPtr == NULL ){
+        printf( "error!\n" );
+        exit(1);
+    } else {
+        char line[100];
+        while( !feof(fPtr) ) {
+            fgets( line, 100, fPtr);
+            printf( "%s\n", line );
+        }
+    }
+
+    fclose( fPtr );
 
     int f = 1;
     int childNum = 0;

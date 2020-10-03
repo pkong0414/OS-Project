@@ -8,17 +8,21 @@ PALIN = palimCheck
 SRC = main.c detachandremove.c
 OBJ = main.o detachandremove.o
 SRC2 = palim.c
-OBJ2 = palim.o
+PALIN_OBJS = palim.o
 
 all: $(TARGETS)
+m: $(MASTER)
+p: $(PALIN)
 
-$(TARGET):$(OBJ)    $(CC) -o $@ $(OBJ)
+master:  $(OBJ)
+	$(CC) -o $@ $(OBJ)
 
-$(TARGET2):$(OBJ2)  $(CC) -o $@ $(OBJ2)
+palimCheck: $(PALIN_OBJS)
+	$(CC) -o $@ $(PALIN_OBJS)
 
 main.o             : main.c
 palim.o            : palim.c
 detachandremove.o  : detachandremove.c
 
 clean :
-	/bin/rm '-f' *.o $(TARGET) $(TARGET2)
+	/bin/rm '-f' *.o $(TARGETS)

@@ -8,34 +8,32 @@
 
 bool isPalim( char * word );
 
-FILE *fPtr;
+FILE *outFilePtr1;
 
 int main( int argc, char** argv){
 
-    fPtr = fopen( argv[ argc - 1 ], "r");
 
-    if( fPtr == NULL ){
-        printf( "error!\n" );
+    char *line = argv[argc - 1];
+    bool palindrome;
+
+    palindrome = isPalim( line );
+
+    outFilePtr1 = fopen( "./output.log", "a");
+    if( outFilePtr1 == NULL ) {
+        printf("error!\n");
         exit(1);
     } else {
-        char line[100];
-        bool palindrome;
-        int f;
-        while( !feof(fPtr) ) {
-            fgets( line, 100, fPtr);
-            palindrome = isPalim(line);
-            if( palindrome == true ) {
-                printf("this is a palindrome.\n");
-            }
-            else {
-                printf("this is not a palindrome\n");
-            }
+        printf( "writing to file...\n" );
+        if (palindrome == true) {
+            fputs(line, outFilePtr1);
+            fputs(" is a palindrome.\n", outFilePtr1);
+        } else {
+            fputs(line, outFilePtr1);
+            fputs(" is not a palindrome.\n", outFilePtr1);
         }
     }
 
-    fclose( FILE *fptr );
-
-
+    fclose( outFilePtr1 );
     return 0;
 }
 
@@ -53,7 +51,7 @@ bool isPalim( char * word ){
         //even case
         midpoint = ( (double)strlen(word)/ 2.0 ) - 1;
     } else {
-        midpoint = ( (double)strlen(word)/ 2.0 ) - 1;
+        midpoint = ( (double)strlen(word)/ 2.0 );
     }
 
     //the index
@@ -66,8 +64,8 @@ bool isPalim( char * word ){
     printf( "reverseCount: %d\n" , reverseCount);
     for(count; count <= midpoint ;count++){
         //debugging output
-        //printf( "character: %c %d \n", word[count], count);
-        //printf( "characterR: %c %d \n", word[reverseCount], reverseCount);
+        printf( "character: %c %d \n", word[count], count);
+        printf( "characterR: %c %d \n", word[reverseCount], reverseCount);
 
         if( word[count] == word[reverseCount] ){
             reverseCount--;
