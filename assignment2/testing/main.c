@@ -7,6 +7,7 @@
 #include <unistd.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
+#include <sys/types.h>
 #include <sys/shm.h>
 #include <stdbool.h>
 #include <string.h>
@@ -88,10 +89,46 @@ int main( int argc, char** argv){
 
     */
 
+    int f = 1;
+    int childNum = 0;
+    //forking processes
+    for( f; f <= 2; f++){
+        //forking
+        pid_t pid = fork();
+        printf("%d: My PID = %d\n", f, (int) getpid());
+        if( pid < 0 )
+            perror( "fork failed.\n");
+        if( pid == 0 ){
+            printf( "I am the child with PID: %d\n", (int) getpid() );
+
+            //shared memory section
+            int totalbytes = 0;
+            sharedheap sharedMem;
+
+            //shared memory grab
+            if((sharedMem.id = shmget( IPC_PRIVATE, sizeof(int), PERM)) == -1){
+                perror("Failed to create shared memory segment\n");
+                return 1;
+            } else {
+                printf("created a new memory segment\n");
+                sharedMem.sharedaddress = (char *)shmat( sharedMem.id, NULL, PERM);
+            }
+
+            if(detachandremove(sharedMem.id, sharedMem.sharedaddress) == -1){
+                perror( "failed to destroy shared memory segment\n");
+                return 1;
+            } else {
+                printf( "destroyed shared memory segment\n" );
+            }
+
+            //exit(42);
+        }
+
+    }
+
+
+
     //shared memory section
-    int id;
-    int *sharedtotal;
-    int totalbytes = 0;
     sharedheap sharedMem;
 
     //shared memory grab
@@ -109,6 +146,18 @@ int main( int argc, char** argv){
     } else {
         printf( "destroyed shared memory segment\n" );
     }
+
+    /*
+    printf("I am the parent, waiting for child to end.\n");
+    sleep(10);
+
+    int status = 0;
+    pid_t childpid = wait( &status );
+    printf("Parent received message child %d is finished with status: %d\n", (int)childpid, status);
+    int childReturnValue = WEXITSTATUS(status);
+    printf("Return value was %d\n", childReturnValue);
+    sleep(1);
+    */
     return 0;
 
 }
