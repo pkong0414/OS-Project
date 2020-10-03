@@ -6,8 +6,40 @@
 #include <stdio.h>
 #include <ctype.h>
 
+bool isPalim( char * word );
 
-bool isPalim( char * word){
+FILE *fPtr;
+
+int main( int argc, char** argv){
+
+    fPtr = fopen( argv[ argc - 1 ], "r");
+
+    if( fPtr == NULL ){
+        printf( "error!\n" );
+        exit(1);
+    } else {
+        char line[100];
+        bool palindrome;
+        int f;
+        while( !feof(fPtr) ) {
+            fgets( line, 100, fPtr);
+            palindrome = isPalim(line);
+            if( palindrome == true ) {
+                printf("this is a palindrome.\n");
+            }
+            else {
+                printf("this is not a palindrome\n");
+            }
+        }
+    }
+
+    fclose( FILE *fptr );
+
+
+    return 0;
+}
+
+bool isPalim( char * word ){
 
     printf( "word: %s\n", word);
     char *ptr = (char*)malloc(sizeof(word));

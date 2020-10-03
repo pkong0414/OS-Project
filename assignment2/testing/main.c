@@ -11,12 +11,9 @@
 #include <sys/shm.h>
 #include <stdbool.h>
 #include <string.h>
-#include "palim.h"
 #define PERM (S_IRUSR | S_IWUSR)
 
 void printhelp();
-
-FILE *fPtr;
 
 int main( int argc, char** argv){
 
@@ -59,35 +56,6 @@ int main( int argc, char** argv){
                 abort();
         }
     }
-
-    /*
-    fPtr = fopen( argv[ argc - 1 ], "r");
-
-    if( fPtr == NULL ){
-        printf( "error!\n" );
-        exit(1);
-    } else {
-        char line[100];
-        bool palindrome;
-        int f;
-        while( !feof(fPtr) ) {
-            fgets( line, 100, fPtr);
-            palindrome = isPalim(line);
-            if( palindrome == true ) {
-                printf("this is a palindrome.\n");
-            }
-            else {
-                printf("this is not a palindrome\n");
-            }
-        }
-
-
-
-    }
-
-    fclose( FILE *fptr );
-
-    */
 
     int f = 1;
     int childNum = 0;
