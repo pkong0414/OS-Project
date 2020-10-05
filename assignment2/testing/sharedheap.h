@@ -3,12 +3,12 @@
 #ifndef SHAREDHEAP_H
 #define SHAREDHEAP_H
 
-typedef struct sharedheap {
+struct sharedheap {
     int id;
-    int count;
-    double sum;
-    char *sharedaddress;
+//    int count;
+//    int shmflg;
+    char **sharedString;
 
-} sharedheap;
+}typedef sharedheap;
 
 #endif
