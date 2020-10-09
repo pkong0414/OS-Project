@@ -13,7 +13,7 @@ int detachandremove(int shmid, void *shmaddr){
     if(!error)
         return 0;
 
-    //assuming there's no error
+    //assuming there's error
     errno = error;
     return -1;
 }
