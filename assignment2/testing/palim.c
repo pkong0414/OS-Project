@@ -64,8 +64,8 @@ int main( int argc, char** argv){
     //line = strtok( line, "\n");
     bool palindrome;
 
-    outFilePtr1 = fopen( "./palin.log", "a");
-    outFilePtr2 = fopen( "./nopalin.log", "a");
+    outFilePtr1 = fopen( "./palin.log", "w+");
+    outFilePtr2 = fopen( "./nopalin.log", "w+");
     if( outFilePtr1 == NULL || outFilePtr2 == NULL ) {
         perror("file did not open\n");
         exit(1);
