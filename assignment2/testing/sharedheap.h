@@ -1,14 +1,17 @@
 //sharedheap.h
 
+#include <signal.h>
+
 #ifndef SHAREDHEAP_H
 #define SHAREDHEAP_H
 
-struct sharedheap {
+typedef struct sharedheap {
     int id;
-//    int count;
-//    int shmflg;
-    char **sharedString;
+    int count;
+    int shmflg;
+    sig_atomic_t ready;
+    char *sharedString;
 
-}typedef sharedheap;
+}sharedheap;
 
 #endif

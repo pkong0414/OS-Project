@@ -9,16 +9,26 @@
 #include <sys/wait.h>
 #include <sys/types.h>
 #include <sys/shm.h>
+#include <signal.h>
 #include <stdbool.h>
 #include <string.h>
 #include <errno.h>
+#include <pthread.h>
 #define PERM (S_IRUSR | S_IWUSR)
 #define KEY 0x12345678
 
 void printhelp();
+void sigquit(int);
 
 FILE *fPtr;
 FILE *outPtr;
+
+//globals
+static int childCount = 0;
+
+//shared memory section
+static int shm_id;
+static sharedheap sharedMem;
 
 int main( int argc, char** argv){
 
@@ -64,32 +74,23 @@ int main( int argc, char** argv){
         }
     }
 
-    //shared memory section
-    sharedheap sharedMem;
-
-
     //shared memory grab
-    sharedMem.id = shmget( KEY, sizeof( sharedheap ), PERM | IPC_CREAT | IPC_EXCL);
+    shm_id = shmget( KEY, 200, PERM | IPC_CREAT | IPC_EXCL);
 
-    printf( "hellow world \n");
-    if( sharedMem.id == -1 ){
+    //implementing ftok( )...
+
+
+    if( shm_id == -1 ){
         if(errno != EEXIST){
            perror( "shared memory already exist.\n");
-        } else if ( (sharedMem.id = shmget( KEY, sizeof( sharedheap ), PERM ) ) == -1) {
+
+        } else if ( (shm_id = shmget( KEY, sizeof(sharedheap), PERM ) ) == -1) {
             perror( "shared memory exist, just can't control it\n");
         }
-    }
-
-//    sharedMem->sharedString = (char *)shmat( sharedMem->id, NULL, 0 );
-//    if( sharedMem->sharedString == (char *) -1 ){
-//        perror( "could not attach shared memory.\n");
-//    }
-
-
-    else {
+    } else {
         printf("created a new memory segment\n");
-        sharedMem.sharedString = (char **)shmat( sharedMem.id, NULL, 0);
-        if(sharedMem.sharedString == (char **) -1 ){
+        sharedMem.sharedString = shmat( shm_id, NULL, 0);
+        if(sharedMem.sharedString == (char *) -1 ){
             perror("shmat failed");
         }
         else {
@@ -99,97 +100,130 @@ int main( int argc, char** argv){
 
     //opening file
     fPtr = fopen( argv[ argc - 1 ], "r");
+    int argCount;
+    char *token;
 
     if( fPtr == NULL ){
         printf( "error! Cannot open the input file.\n" );
         exit(1);
     } else {
-        char line[100];
-        int i = 0;
-        sharedMem.sharedString = malloc( 100 );
-        while( !feof(fPtr) ) {
-            fgets( line, 100, fPtr);
-            printf( "line: %s\n", line );
+        //adding new parts here.
 
-            sharedMem.sharedString[i] = malloc( strlen(line) + 1 );
-            strcpy(sharedMem.sharedString[i], line );
-            printf( "args: %s\n", sharedMem.sharedString[i++]);
-        }
-
-    }
-
-    int argCount = 0;
-    for( argCount ; argCount < 4 ; argCount++) {
-        printf("sharedMem.sharedString: %s\n", sharedMem.sharedString[argCount]);
-    }
-    outPtr =  fopen( outPath, "a" );
-
-    if ( outPtr == NULL ){
-        printf( "error! Cannot open output file.\n" );
-        exit(1);
-    }
-
-    fclose( fPtr );
-
-    int f = 1;
-    int childNum = 0;
-    //forking processes
-    for( f; f <= 2; f++){
+        int f = 1;
+        int childNum = 0;
+        //forking processes
+        char *line;
+        int totalCPCreate = 0;
+        int nProcesses = 0;
+        pid_t childPid;
+        int index;
+        char *token;
+        int strings = 0;
+        line = malloc( 100 );
         //forking
-        pid_t pid = fork();
-        printf("\n%d: My PID = %d\n", f, (int) getpid());
-        if( pid < 0 )
-            perror( "fork failed.\n");
-        if( pid == 0 ){
-            printf( "I am the child with PID: %d\n", (int) getpid() );
-
-            //exit(42);
+        char *dest = sharedMem.sharedString;
+        while( fgets(line, 100,fPtr ) != NULL ){
+            strtok( line, "\r\n");
+            printf( "in main: line: %s\n", line);
+            strcpy( dest, line);
+            dest += strlen(line) + 1;
+            *dest = 0;
+            strings++;
         }
 
+        //kill switch
+        signal(SIGINT, sigquit);
+
+        //we'll never make more processes than the max processes allowed!
+        for( ;childCount < nValue;) {
+            for (nProcesses = 0; nProcesses < sValue; nProcesses++) {
+
+                //decrementing strings
+                strings--;
+
+                if(strings == 0){
+                    printf("File is empty. Terminating program\n");
+                    return 0;
+                }
+                //fanning the forks
+                if ((childPid = fork()) <= 0) {
+                    break;
+                }
+            }
+            if (childPid == 0) {
+                //debugging output
+                printf("nProcesses: %d\n", nProcesses);
+                printf("\n%d: My PID = %d\n", f, (int) getpid());
+                printf("\n");
+                char argStrings[10];
+
+                printf("strings: %d\n", strings);
+                sprintf(argStrings, "%d", strings);
+                printf("argStrings: %s\n", argStrings);
+
+                char *arguments[] = {"./palimCheck", argStrings, NULL};
+                int i;
+                for (i = 0; i < 3; i++) {
+                    printf("arg[%d]: %s\n", i, arguments[i]);
+                }
+                printf("I am the child with PID: %d\n", (int) getpid());
+                //fork success now exec here
+                printf("execing...\n");
+                execv(arguments[0], arguments);
+
+                //add perror(), incase something fails.
+                perror("exec failed\n");
+
+                //exit(42);
+            }
+
+            int children;
+            for (children = 0; children < nProcesses; children++) {
+                wait(NULL);
+                childCount++;
+                printf( "childCount + 1: %d\n", (childCount + 1) );
+                printf( "totalCPCreate: %s\n", totalCPCreate);
+                printf("process is finished!\n");
+            }
+            //parent is waiting for all the children to end process
+
+            if ((childCount + 1) == nValue) {
+                //closing out the program after master has created max processes allowed
+
+                fclose(fPtr);
+                if (detachandremove(shm_id, sharedMem.sharedString) == -1) {
+                    perror("failed to destroy shared memory segment\n");
+                    return 1;
+                } else {
+                    printf("destroyed shared memory segment\n");
+                }
+            }
+        }
     }
 
+    fclose(fPtr);
 
-    if(detachandremove(sharedMem.id, sharedMem.sharedString) == -1){
-        perror( "failed to destroy shared memory segment\n");
+    if (detachandremove(shm_id, sharedMem.sharedString) == -1) {
+        perror("failed to destroy shared memory segment\n");
         return 1;
     } else {
-        printf( "destroyed shared memory segment\n" );
+        printf("destroyed shared memory segment\n");
     }
 
-    /*
-    //shared memory grab
-    if((sharedMem.id = shmget( KEY, sizeof(struct sharedheap), PERM | IPC_CREAT)) == -1){
-        perror("Failed to create shared memory segment\n");
-        return 1;
-    } else {
-        printf("created a new memory segment\n");
-        sharedMem.sharedaddress = (char *)shmat( sharedMem.id, NULL, PERM);
-    }
-
-    if(detachandremove(sharedMem.id, sharedMem.sharedaddress) == -1){
-        perror( "failed to destroy shared memory segment\n");
-        return 1;
-    } else {
-        printf( "destroyed shared memory segment\n" );
-    }
-    */
-
-    /*
-    printf("I am the parent, waiting for child to end.\n");
-    sleep(10);
-
-    int status = 0;
-    pid_t childpid = wait( &status );
-    printf("Parent received message child %d is finished with status: %d\n", (int)childpid, status);
-    int childReturnValue = WEXITSTATUS(status);
-    printf("Return value was %d\n", childReturnValue);
-    sleep(1);
-    */
     return 0;
 
 }
 
 void printhelp(){
 
+}
 
+void sigquit( int signum ){
+    printf( "Caught signal %d, quitting...\n", signum );
+    if (detachandremove(shm_id, sharedMem.sharedString) == -1) {
+        perror("failed to destroy shared memory segment\n");
+    } else {
+        printf("destroyed shared memory segment\n");
+    }
+    exit(1);
 }
