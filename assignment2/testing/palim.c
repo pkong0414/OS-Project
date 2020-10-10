@@ -10,12 +10,13 @@
 #include <stdio.h>
 #include <ctype.h>
 #define PERM (S_IRUSR | S_IWUSR)
-#define KEY 0x12345678
+
 
 
 bool isPalim( char * word );
 FILE *outFilePtr1;
 FILE *outFilePtr2;
+
 int main( int argc, char** argv){
 
     int zeroCount = 0;
@@ -23,15 +24,20 @@ int main( int argc, char** argv){
     char *line;
 
     int shm_id;
-
+    key_t myKey;
+    if( ( myKey = ftok( ".", 1) ) == (key_t) -1 ) {
+        fprintf(stderr, "Failed to derive key from filename %s:%s\n",
+                argv[argc - 1], strerror( errno ) );
+    }
     //*********************shared memory portion**********************
-    shm_id = shmget( KEY, 200, PERM);
+    shm_id = shmget( myKey, 200, PERM);
     //implementing ftok( )...
     if( shm_id == -1 ){
         if(errno != EEXIST){
-            perror( "palim.c: shared memory already exist.\n");
+            strerror( errno );
+            perror( "palim.c: shared memory does not exist.\n");
 
-        } else if ( (shm_id = shmget( KEY, 200, PERM ) ) == -1) {
+        } else if ( (shm_id = shmget( myKey, 200, PERM ) ) == -1) {
             perror( "palim.c: shared memory exist, just can't control it\n");
         }
     } else {
@@ -51,7 +57,8 @@ int main( int argc, char** argv){
     while(zeroCount < currentIndex){
 //        printf( "%c\n", *word);
         if( *currentLine == 0 ){
-            printf( "palim.c: zeroCount: %d\n", zeroCount);
+//            debug output only
+//            printf( "palim.c: zeroCount: %d\n", zeroCount);
             zeroCount++;
         }
         currentLine++;
@@ -64,8 +71,8 @@ int main( int argc, char** argv){
     //line = strtok( line, "\n");
     bool palindrome;
 
-    outFilePtr1 = fopen( "./palin.log", "w+");
-    outFilePtr2 = fopen( "./nopalin.log", "w+");
+    outFilePtr1 = fopen( "./palin.log", "a");
+    outFilePtr2 = fopen( "./nopalin.log", "a");
     if( outFilePtr1 == NULL || outFilePtr2 == NULL ) {
         perror("file did not open\n");
         exit(1);
@@ -85,7 +92,8 @@ bool isPalim( char *word ){
     //we'll need a half way point for the loop
     int midpoint;
     char *outputWord = word;
-    printf( "isPalim word: %s\n", word);
+//    debug output only
+//    printf( "isPalim word: %s\n", word);
     if( strlen(word) % 2 == 0){
         //even case
         midpoint = ( (double)strlen(word)/ 2.0 ) - 1;
@@ -106,6 +114,7 @@ bool isPalim( char *word ){
 //        printf( "character: %c %d \n", word[count], count);
 //        printf( "characterR: %c %d \n", word[reverseCount], reverseCount);
 
+        //add isalnum(c) into this section... Goal is to make comparison with alpha and numerical.
         if( word[count] == word[reverseCount] ){
             reverseCount--;
         } else {

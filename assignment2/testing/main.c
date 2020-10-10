@@ -5,8 +5,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <sys/ipc.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
+#include <sys/time.h>
 #include <sys/types.h>
 #include <sys/shm.h>
 #include <signal.h>
@@ -15,30 +17,106 @@
 #include <errno.h>
 #include <pthread.h>
 #define PERM (S_IRUSR | S_IWUSR)
-#define KEY 0x12345678
 
 void printhelp();
-void sigquit(int);
 
 FILE *fPtr;
 FILE *outPtr;
 
+//this value will take in a max total of child processes master will ever create.
+static int nValue = 4;
+
+//this value will take in the number of children allowed to exist in the system at the same time.
+static int sValue = 2;
+
+//this value will take in seconds after which the process terminate, even if it has not finished.
+static int tValue = 100;
 static int processCount = 0;
+static int stringsLeft = 0;
 
 //shared memory section
+key_t myKey;
 static int shm_id;
 static sharedheap sharedMem;
 
+/* ARGUSED */
+static void myhandler( int s ) {
+    char timeout[] = "timing out processes.\n";
+    int timeoutSize = sizeof( timeout );
+    int errsave;
+
+    errsave = errno;
+    write(STDERR_FILENO, timeout, timeoutSize );
+    errno = errsave;
+    int i;
+
+    //waiting for max amount of children to terminate
+    for (i = 0; i <= nValue ; ++i) {
+        wait(NULL);
+    }
+    //detaching shared memory
+    if (detachandremove(shm_id, sharedMem.sharedString) == -1) {
+        perror("failed to destroy shared memory segment\n");
+        exit(0);
+    } else {
+        printf("destroyed shared memory segment\n");
+    }
+    exit(0);
+}
+
+static void myKillSignalHandler( int s ){
+    char timeout[] = "caught ctrl+c, ending processes.\n";
+    int timeoutSize = sizeof( timeout );
+    int errsave;
+
+    errsave = errno;
+    write(STDERR_FILENO, timeout, timeoutSize );
+    errno = errsave;
+    int i;
+
+    //waiting for max amount of children to terminate
+    for (i = 0; i <= nValue ; ++i) {
+        wait(NULL);
+    }
+    //detaching shared memory
+    if (detachandremove(shm_id, sharedMem.sharedString) == -1) {
+        perror("failed to destroy shared memory segment\n");
+        exit(0);
+    } else {
+        printf("destroyed shared memory segment\n");
+    }
+    exit(0);
+}
+
+static int setupUserInterrupt( void ){
+    struct sigaction act;
+    act.sa_handler = myKillSignalHandler;
+    act.sa_flags = 0;
+    return (sigemptyset(&act.sa_mask) || sigaction(SIGINT, &act, NULL));
+}
+
+static int setupinterrupt( void ){
+    struct sigaction act;
+    act.sa_handler = myhandler;
+    act.sa_flags = 0;
+    return (sigemptyset(&act.sa_mask) || sigaction(SIGALRM, &act, NULL));
+}
+
+static int setupitimer(int tValue) {
+    struct itimerval value;
+    value.it_interval.tv_sec = tValue;
+    value.it_interval.tv_usec = 0;
+    value.it_value = value.it_interval;
+    return (setitimer( ITIMER_REAL, &value, NULL));
+}
+
 int main( int argc, char** argv){
 
-    //this value will take in a max total of child processes master will ever create.
-    int nValue = 4;
+    if( setupUserInterrupt() == -1 ){
+        perror( "failed to set up a user kill signal.\n");
+        return 1;
+    }
 
-    //this value will take in the number of children allowed to exist in the system at the same time.
-    int sValue = 2;
-
-    //this value will take in seconds after which the process terminate, even if it has not finished.
-    int tValue = 100;
     int c;
 
     char *outPath = "output.log";
@@ -65,25 +143,42 @@ int main( int argc, char** argv){
                 printf("sValue: %d\n", sValue);
                 break;
             case 't':
-                tValue = atoi( optarg );
-                printf( "tValue: '%s'\n", optarg );
+                if( atoi( optarg ) > 0 )
+                    tValue = atoi( optarg );
+                printf( "tValue: %d\n", tValue );
                 break;
             default:
                 break;
         }
     }
 
+    //setting up interrupts
+    if (setupinterrupt() == -1) {
+        perror("Failed to set up handler for SIGALRM");
+        return 1;
+    }
+
+    if (setupitimer(tValue) == -1) {
+        perror("Failed to set up the ITIMER_PROF interval timer");
+        return 1;
+    }
+
+    if( ( myKey = ftok( ".", 1 ) ) == (key_t)-1 ) {
+        fprintf(stderr, "Failed to derive key from filename %s:%s\n",
+                argv[argc - 1], strerror( errno ) );
+        return 1;
+    }
     //shared memory grab
-    shm_id = shmget( KEY, 200, PERM | IPC_CREAT | IPC_EXCL);
+    shm_id = shmget( myKey, 200, PERM | IPC_CREAT | IPC_EXCL);
 
     //implementing ftok( )...
 
 
     if( shm_id == -1 ){
         if(errno != EEXIST){
-           perror( "shared memory already exist.\n");
+            perror( "shared memory already exist.\n");
 
-        } else if ( (shm_id = shmget( KEY, sizeof(sharedheap), PERM ) ) == -1) {
+        } else if ( (shm_id = shmget( myKey, sizeof(sharedheap), PERM ) ) == -1) {
             perror( "shared memory exist, just can't control it\n");
         }
     } else {
@@ -108,11 +203,11 @@ int main( int argc, char** argv){
         int f = 1;
         int childNum = 0;
         //forking processes
-        int nProcesses = 0;
+        int concurProcesses = 0;
         pid_t childPid;
         int index;
         int processCount = 0;
-        int stringsLeft = 0;
+        int status = 0;
 
         char *line;
         line = malloc( 100 );
@@ -131,103 +226,111 @@ int main( int argc, char** argv){
         //closing file after use
         fclose(fPtr);
 
-        //kill switch
-        signal(SIGINT, sigquit);
-        int allowedProcesses = nValue;
+        printf( "outside the loop (stringsLeft): %d\n", stringsLeft);
+
         //we'll never make more processes than the max processes allowed!
-        for( ;allowedProcesses > 0;) {
-            for (nProcesses = 0; (nProcesses < allowedProcesses && nProcesses < sValue); nProcesses++) {
+        while( processCount < nValue ) {
 
-                //decrementing strings
+            if( concurProcesses < sValue ) {
+
+                //incrementing total processes created
+                processCount++;
+                //increment active processes
+                concurProcesses++;
                 stringsLeft--;
-                processCount++;
-                nProcesses++;
-                allowedProcesses = nValue - (processCount + 1);
-                printf( "processCount: %d\n", processCount );
-                printf( "allowedProcesses: %d\n", allowedProcesses );
-                printf( "nProcesses: %d\n", nProcesses);
-                printf( "stringsLeft: %d\n", stringsLeft );
-                //we don't want the forking to extend beyond the end of file!
-                if(stringsLeft < 0 ){
-                    printf("File is empty. Terminating program\n");
-                    break;
-                }
-
-                //stopping the process of forking because process limit reached!
-                if( allowedProcesses <= 0 ) {
-                    printf( "maximum processes reached!\n");
-                    break;
-                }
-                //we don't want more processes than for what is allowed (even if nProcess is less than sValue)!
-                if( ( processCount ) == nValue ){
-                    printf("Max processing limit reached! ");
-                    break;
-                    //exit(42);
-                }
-
-                //fanning the forks
-                if ((childPid = fork()) <= 0) {
-                    break;
-                }
-
-
-            }
-            if( childPid == 0) {
-                //************************ Child Process ******************************//
-
-                //debugging output
-                //processCount++;
-                allowedProcesses = nValue - (processCount + 1);
-
-                printf("nProcesses: %d\n", nProcesses);
-                printf("\n%d: My PID = %d\n", f, (int) getpid());
-                printf("\n");
-                char argStrings[10];
-                if (allowedProcesses < 0) {
-                    printf("Max processing limit reached! ");
-
-                    return 0;
-                    //exit(42);
-                }
-
+                printf("processCount: %d\n", processCount);
+                printf("concurProcesses: %d\n", concurProcesses);
                 printf("stringsLeft: %d\n", stringsLeft);
-                sprintf(argStrings, "%d", stringsLeft);
-                printf("argStrings: %s\n", argStrings);
-
-                char *arguments[] = {"./palimCheck", argStrings, NULL};
-                int i;
-                for (i = 0; i < 3; i++) {
-                    printf("arg[%d]: %s\n", i, arguments[i]);
+                //we don't want the forking to extend beyond the end of file!
+                if (stringsLeft < 0) {
+                    printf("File is empty. Terminating program\n");
+                    if (detachandremove(shm_id, sharedMem.sharedString) == -1) {
+                        perror("failed to destroy shared memory segment\n");
+                    } else {
+                        printf("destroyed shared memory segment\n");
+                    }
+                    break;
                 }
-                printf("I am the child with PID: %d\n", (int) getpid());
-
-                //fork success now exec here
-                printf("execing...\n");
-                execv(arguments[0], arguments);
-
-                //add perror(), incase something fails.
-                perror("exec failed\n");
-            } else {
-                //******************* PARENT PROCESS *********************************//
-
-                //parent is waiting for all the children to end process
-                wait(NULL);
-
-                //incrementing processCount
-                processCount++;
-
-
-                printf("processCount + 1: %d\n", (processCount + 1));
-                printf("process is finished!\n");
 
                 //we don't want more processes than for what is allowed (even if nProcess is less than sValue)!
+                if (processCount == nValue) {
+                    printf("processCount: %d\n", processCount);
+                    printf("Max processing limit reached!\n");
+                    break;
+                    //exit(42);
+                }
+
+                childPid = fork();
+
+                if ( childPid < 0) {
+                    perror("failed to fork");
+                    exit(1);
+                }
+
+                if( childPid == 0) {
+                    //************************ Child Process ******************************//
+
+                    //debugging output
+                    //processCount++;
+
+                    printf("\n%d: My PID = %d\n", f, (int) getpid());
+                    printf("concurProcesses: %d\n", concurProcesses);
+                    printf("\n");
+                    char argStrings[10];
+
+                    printf("stringsLeft: %d\n", stringsLeft);
+                    sprintf(argStrings, "%d", stringsLeft);
+                    printf("argStrings: %s\n", argStrings);
+
+                    char *arguments[] = {"./palimCheck", argStrings, NULL};
+                    int i;
+                    for (i = 0; i < 3; i++) {
+                        printf("arg[%d]: %s\n", i, arguments[i]);
+                    }
+                    printf("I am the child with PID: %d\n", (int) getpid());
+
+                    //fork success now exec here
+                    printf("execing...\n");
+                    execv(arguments[0], arguments);
+
+                    //add perror(), incase something fails.
+                    perror("exec failed\n");
+                }
+
+                    int activeProcesses;
+                    for (activeProcesses = 0; activeProcesses <= sValue; activeProcesses++) {
+                        //******************* PARENT PROCESS *********************************//
+                        //parent is waiting for all the children to end process
+                        wait(&status);
+
+                        //decrementing number of processes concurrent
+                        concurProcesses--;
+
+                        //breaking out of the wait process when the number of concurrent processes is out
+                        if(concurProcesses == 0 ){
+                            break;
+                        }
+
+                        //incrementing total processes created
+                        //processCount++;
+
+                        printf("processCount: %d\n", (processCount));
+                        printf("process is finished!\n");
+                }
+                if(processCount == nValue){
+                    break;
+                }
+            }
+
+
+            //we don't want more processes than for what is allowed (even if nProcess is less than sValue)!
+            if(processCount == nValue){
+                break;
             }
         }
     }
-
     if (detachandremove(shm_id, sharedMem.sharedString) == -1) {
         perror("failed to destroy shared memory segment\n");
-        return 1;
     } else {
         printf("destroyed shared memory segment\n");
     }
@@ -236,14 +339,4 @@ int main( int argc, char** argv){
 
 void printhelp(){
 
-}
-
-void sigquit( int signum ){
-    printf( "Caught signal %d, quitting...\n", signum );
-    if (detachandremove(shm_id, sharedMem.sharedString) == -1) {
-        perror("failed to destroy shared memory segment\n");
-    } else {
-        printf("destroyed shared memory segment\n");
-    }
-    exit(1);
 }
