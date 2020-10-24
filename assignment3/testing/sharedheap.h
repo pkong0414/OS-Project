@@ -2,6 +2,7 @@
 
 #include <signal.h>
 #include <semaphore.h>
+#include <pthread.h>
 
 #ifndef SHAREDHEAP_H
 #define SHAREDHEAP_H

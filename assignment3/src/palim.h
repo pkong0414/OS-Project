@@ -1,4 +1,5 @@
 //palim.h
+#include "semstuff.h"
 #include <stdbool.h>
 
 #ifndef PALIM_H
@@ -8,6 +9,6 @@ bool isPalim( char * word, int currentIndex, int shm_id);
 
 //************************************ Future implementation ********************************
 
-//void processQueue ( const int processingIndex, bool result, char* outputWord, int shm_id );
+void processQueue ( char* fileName, char* outputWord);
 
 #endif
