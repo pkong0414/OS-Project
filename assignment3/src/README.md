@@ -1,6 +1,6 @@
 Name: Patrick Kong
 Date: 10/09/2020
-Assignment 2
+Assignment 4
 
 This program will process a text file and detect if the strings inside the file are palindromes.
 
@@ -19,3 +19,5 @@ Interrupts:
 File processed will populate files: palin.log and nopalin.log.
 
 These files will contain respective palindromes and non- palindromes. 
+
+ISSUES:

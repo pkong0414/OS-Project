@@ -1,5 +1,10 @@
 #include "palim.h"
 #include "sharedheap.h"
+#include "semstuff.h"
+#include <semaphore.h>
+#include <fcntl.h>
+#include <sys/ipc.h>
+#include <sys/sem.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/shm.h>
@@ -10,15 +15,16 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <ctype.h>
-#define PERM (S_IRUSR | S_IWUSR)
+#include <pthread.h>
+#define PERMS (S_IRUSR | S_IWUSR)
 
 bool isPalim( char *word, int currentIndex, int shm_id );
+void processQueue( char* filename, char* outputWord );
 
 //********************* for critical section implementation **********************
 //void processQueue ( const int i, bool result, char* outputWord, int shm_id );
 
 FILE *outFilePtr1;
-FILE *outFilePtr2;
 
 sharedheap *sharedMem = NULL;
 
@@ -30,39 +36,39 @@ int main( int argc, char** argv){
 
     int shm_id;
     key_t myKey;
+
     if( ( myKey = ftok( ".", 1) ) == (key_t) -1 ) {
         fprintf(stderr, "Failed to derive key from filename %s:%s\n",
                 argv[argc - 1], strerror( errno ) );
     }
     //*********************shared memory portion**********************
-    shm_id = shmget( myKey, 200, PERM);
+    shm_id = shmget( myKey, 200, PERMS);
     //implementing ftok( )...
     if( shm_id == -1 ){
         if(errno != EEXIST){
             strerror( errno );
             perror( "palim.c: shared memory does not exist.\n");
 
-        } else if ( (shm_id = shmget( myKey, sizeof(struct sharedheap), PERM ) ) == -1) {
+        } else if ( (shm_id = shmget( myKey, sizeof(struct sharedheap), PERMS ) ) == -1) {
             perror( "palim.c: shared memory exist, just can't control it\n");
         }
     } else {
-        printf("palim.c: created a new memory segment\n");
-        line = (char *)shmat( shm_id, NULL, 0);
+        printf("palim.c: success! Shared memory from derived key\n");
+        sharedMem = shmat( shm_id, NULL, 0);
 
         //for the critical section implementation
 //        sharedMem = (sharedheap) shmat( shm_id, NULL, 0);
 //        line = sharedMem.sharedString;
-        if(line == (char *) -1 ){
+        if(sharedMem == (void *) -1 ){
             perror("palim.c: shmat failed");
             exit(1);
         }
         else {
-            printf( "palim.c: shmat returned %#8.8x\n", line);
+            printf( "palim.c: shmat returned %#8.8x\n", sharedMem);
         }
     }
-    //*****************************************************************
 
-    char *currentLine = line;
+    char *currentLine = &sharedMem->sharedString[0];
     while(zeroCount < currentIndex){
 //        printf( "%c\n", *word);
         if( *currentLine == 0 ){
@@ -80,18 +86,8 @@ int main( int argc, char** argv){
     //line = strtok( line, "\n");
     bool palindrome;
 
-    outFilePtr1 = fopen( "./palin.log", "a");
-    outFilePtr2 = fopen( "./nopalin.log", "a");
-    if( outFilePtr1 == NULL || outFilePtr2 == NULL ) {
-        perror("file did not open\n");
-        exit(1);
-        printf( "writing to file...\n" );
-    } else {
-        palindrome = isPalim( word, currentIndex, shm_id );
-    }
+    palindrome = isPalim( word, currentIndex, shm_id );
 
-    fclose( outFilePtr1 );
-    fclose( outFilePtr2 );
     return 0;
 }
 
@@ -127,81 +123,95 @@ bool isPalim( char *word, int currentIndex, int shm_id){
         if( word[count] == word[reverseCount] ){
             reverseCount--;
         } else {
-
-//            processQueue( currentIndex, false, outputWord, shm_id);
-            printf("writing to file\n");
-            fprintf(outFilePtr2, "%s is not a palindrome\n", outputWord);
-            printf( "%s is a palindrome\n", outputWord);
+            printf( "going into processQueue\n");
+            processQueue( "./nopalin.log", outputWord );
             return false;
         }
     }
     //returning true
-//    processQueue( currentIndex, true, outputWord, shm_id);
-    printf("writing to file\n");
-    fprintf(outFilePtr1, "%s is a palindrome\n", outputWord);
-    printf( "%s is a palindrome\n", outputWord);
+    printf( "going into processQueue\n");
+    processQueue( "./palin.log", outputWord );
     return true;
 }
 
 //******************************* Critical Section implementation ********************************************
 
-//void processQueue ( const int processingIndex, bool result, char* outputWord, int shm_id ) /* ith Process */
-//{
-//    bool finished = false;
-////    //************************ shared memory section ***********************************
-////    sharedMem.sharedQueue = shmat( shm_id, NULL, 0);
-////    if(sharedMem.sharedQueue == -1 ){
-////        perror("shmat sharedMem.sharedQueue failed");
-////    }
-////    else {
-////        printf( "shmat sharedMem.sharedQueue returned %#8.8x\n", sharedMem.sharedQueue);
-////    }
-////
-////    sharedMem.choosing = shmat( shm_id, NULL, 0);
-////    if(sharedMem.choosing == -1 ){
-////        perror("shmat sharedMem.choosing failed");
-////    }
-////
-////    else {
-////        printf( "shmat sharedMem.choosing returned %#8.8x\n", sharedMem.choosing);
-////    }
-////
-////    sharedMem.ticket = shmat( shm_id, NULL, 0);
-////    if(sharedMem.ticket == -1 ){
-////        perror("shmat sharedMem.ticket failed");
-////    }
-////    else {
-////        printf( "shmat sharedMem.ticket returned %#8.8x\n", sharedMem.ticket);
-////    }
-////    //***********************************************************************************
-//
-//
-//    do {
-//        sharedMem->choosing[processingIndex] = true;
-//        //number is the id
-//        sharedMem->sharedQueue[processingIndex] = sharedMem->ticket;       //giving ticket to the processes that come along.
-//        sharedMem->ticket++;
-//        sharedMem->choosing[processingIndex] = false;
-//        int j;
-//        for (j = 0; j < 20; j++) {
-//            while (sharedMem->choosing[j]); // Wait while someone else is choosing
-//            while ((sharedMem->sharedQueue[j]) && (sharedMem->sharedQueue[j], j) < (sharedMem->sharedQueue[processingIndex], processingIndex));
-//        }
-//
-//        //******************* Critical Section *************************************
-//        if( result == false ) {
-//            printf("writing to file\n");
-//            fprintf(outFilePtr2, "%s is not a palindrome\n", outputWord);
-//            printf( "%s is a palindrome\n", outputWord);
-//        } else {
-//            printf("writing to file\n");
-//            fprintf(outFilePtr1, "%s is a palindrome\n", outputWord);
-//            printf( "%s is a palindrome\n", outputWord);
-//        }
-//        //**************************************************************************
-//        sharedMem->sharedQueue[processingIndex] = 0;
-//        finished = true;
-//    }while (finished = false);
-//    //processing finishes and we hop out of queue
-//    return;
-//}
+void processQueue( char* filename, char* outputWord ) {
+    int error;
+    int semVal;
+    int valResult;
+    int waiting;
+    int sem_id;
+
+    key_t mySemKey;
+    //********************** semaphore section ************************
+
+    //grabbing key for semaphores
+    if (( mySemKey = ftok( ".", 1 ) ) == (key_t)-1 ) {
+        printf("Failed to derive sem key from filename\n");
+        return;
+    }
+
+    if(( sem_id = semget( mySemKey, 1, PERMS)) == -1 ) {
+        //failed to create a semaphore
+        perror("Failed to create a semaphore");
+        return;
+    }
+
+    struct sembuf semSignal[1];
+    struct sembuf semWait[1];
+
+    if (initelement( sem_id, 0, 1) == -1){
+        printf("Failed to initialize semaphore element to 1");
+        if (( error = semctl( sem_id, 0, IPC_RMID)) == -1 )
+            printf("Failed to remove semaphore.\n");
+        return;
+    }
+    //*****************************************************************
+
+
+    setsembuf(semWait, 0, -1, 0);                            // decrement element 0
+    setsembuf(semSignal, 0, 1, 0);                           // increment element 0
+        if ((error = r_semop(sem_id, semWait, 1)) == -1) {
+            printf("Child failed to lock semid: %s", error);
+            return;
+        } else if (!error) {            //we were able to lock the semaphore.
+            //*********************** Critical Section start ********************************************
+            //debugging output
+            printf("going into wait\n");
+
+            //Critical section here
+            outFilePtr1 = fopen(filename, "a");
+            if (outFilePtr1 == NULL) {
+                perror("file did not open\n");
+                exit(1);
+            } else {
+                printf("file opened.\n");
+            }
+            printf("sem_id: %d is writing to file:%s now.\n", sem_id, filename);
+            if (strcmp(filename, "./palin.log") == 0) {
+                //true case of palindrome
+                fprintf(outFilePtr1, "%s is a palindrome\n", outputWord);
+                printf("%s is a palindrome\n", outputWord);
+                printf("closing file...\n");
+                close(outFilePtr1);
+                waiting = false;
+            } else {  //false case of palindrome
+                fprintf(outFilePtr1, "%s is not a palindrome\n", outputWord);
+                printf("%s not is a palindrome\n", outputWord);
+                printf("closing file...\n");
+                fclose(outFilePtr1);
+                waiting = false;
+            }
+            //********************** Exit section here ***********************************************
+            if ((error = r_semop(sem_id, semSignal, 1)) == -1)
+                perror("Failed to unlock semid");
+        }
+    //********************************** Remainder section *************************************
+
+//    if(( error = semctl( sem_id, 0, IPC_RMID)) == -1 ){
+//        printf("Failed to clean up\n");
+//        return;
+//    }
+    return;
+}

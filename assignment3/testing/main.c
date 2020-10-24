@@ -7,7 +7,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <fcntl.h>
 #include <sys/ipc.h>
+#include <sys/sem.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <sys/time.h>
@@ -59,6 +61,10 @@ static void myhandler( int s ) {
     for (i = 0; i <= nValue ; ++i) {
         wait(NULL);
     }
+
+    //removing semaphore
+    semctl( sem_id, 0, IPC_RMID );
+
     //detaching shared memory
     if (detachandremove(shm_id, sharedMem->sharedString) == -1) {
         perror("failed to destroy shared memory segment\n");
@@ -123,6 +129,8 @@ int main( int argc, char** argv){
     }
 
     int c;
+    struct sembuf semWait[nValue - 1];
+    struct sembuf semSignal[nValue - 1];
 
     char *outPath = "output.log";
 
@@ -157,6 +165,17 @@ int main( int argc, char** argv){
         }
     }
 
+    //***************************** Resetting the files ***********************************
+    FILE *outFilePtr1;
+
+    outFilePtr1 = fopen("./palin.log", "w");
+    fclose(outFilePtr1);
+
+    outFilePtr1 = fopen("./nopalin.log", "w");
+    fclose(outFilePtr1);
+
+    //*************************************************************************************
+
     //setting up interrupts
     if (setupinterrupt() == -1) {
         perror("Failed to set up handler for SIGALRM");
@@ -182,16 +201,14 @@ int main( int argc, char** argv){
         return 1;
     }
 
-    //using semaphores now
-    //sem_id = semget( mySemKey, 20, PERM | IPC_CREAT | IPC_EXCL );
+    //using semget to access semaphores now
+    sem_id = semget( mySemKey, 20, PERM | IPC_CREAT | IPC_EXCL );
 
-
-
-//    //for now we'll test with nsem 2
-//    if( sem_id == -1 ) {
-//        printf( "Failed to create semaphore with key%d%s\n", (int)mySemKey, strerror(errno) );
-//        return 1;
-//    }
+    //for now we'll test with nsem 2
+    if( sem_id == -1 ) {
+        printf( "Failed to create semaphore with key%d%s\n", (int)mySemKey, strerror(errno) );
+        return 1;
+    }
 
     //shared memory grab
     shm_id = shmget( myKey, 200, PERM | IPC_CREAT | IPC_EXCL);
@@ -213,14 +230,16 @@ int main( int argc, char** argv){
             perror("shmat sharedMem failed");
         }
         else {
-            printf( "shmat sharedMem returned %#8.8x\n", sharedMem);
+            printf("shmat sharedMem returned %#8.8x\n", sharedMem);
         }
-
-        sem_id = sem_init(&sharedMem->semMem, 1, 0);
 
         if( sem_id == -1 ){
             perror("semaphore did not initialize correctly.");
         }
+        else {
+            printf("main: success! semaphore initiated\n");
+        }
+
         //************** use to solve the Critical Section ************************
 //        sharedMem.sharedQueue = shmat( shm_id, NULL, 0);
 //        if(sharedMem.sharedQueue == -1 ){
@@ -284,6 +303,26 @@ int main( int argc, char** argv){
         fclose(fPtr);
 
 //        printf( "outside the loop (stringsLeft): %d\n", stringsLeft);
+
+        //this section is for initializing the sembufs
+        int i = 0;
+        for( i ; i < nValue; i++ ) {
+            //initializing semWait
+            setsembuf( &semWait[i], i, -1, 0);
+//            semWait.sem_num[i] = (short)i;
+//            semWait.sem_op[i] = (short)-1;
+//            semWait.sem_flg[i] = (short)0;
+
+            //initializing semSignal
+            setsembuf( &semSignal[i], i, 1, 0);
+//            semSignal.sem_num[i] = (short)i;
+//            semSignal.sem_op[i] = (short)1;
+//            semSignal.sem_flg[i] = (short)0;
+        }
+
+        //debugging output
+        printf( "number of semWait: %d\n", semWait->sem_num);
+        printf( "number of semSignal: %d\n", semSignal->sem_num);
 
         //we'll never make more processes than the max processes allowed!
         while( (processCount - 1) < nValue ) {
@@ -388,6 +427,10 @@ int main( int argc, char** argv){
             }
         }
     }
+    //removing semaphores
+    semctl( sem_id, 0, IPC_RMID );
+
+    //for detaching shared memory
     if (detachandremove(shm_id, sharedMem->sharedString) == -1) {
         perror("failed to destroy shared memory segment\n");
     } else {
@@ -397,5 +440,10 @@ int main( int argc, char** argv){
 }
 
 void printhelp(){
-
+    printf("This is a program that will use semaphores to manage the writing to file\n");
+    printf("INVOCATION:\n");
+    printf("./master -n nValue -s sValue -t tValue\n");
+    printf("nValue controls the max number of processes the master will create (default: 4. Limit: 20.)\n");
+    printf("sValue controls the max number of concurrent processes the master will run at the same time (default: 2. Limit: 20.)\n");
+    printf("tValue controls the time limit the program will have to fully run\n");
 }
