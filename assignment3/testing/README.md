@@ -1,6 +1,6 @@
 Name: Patrick Kong
 Date: 10/09/2020
-Assignment 4
+Assignment 3
 
 This program will process a text file and detect if the strings inside the file are palindromes.
 
