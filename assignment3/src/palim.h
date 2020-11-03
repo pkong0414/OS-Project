@@ -9,6 +9,6 @@ bool isPalim( char * word, int currentIndex, int shm_id);
 
 //************************************ Future implementation ********************************
 
-void processQueue ( char* fileName, char* outputWord);
+void processQueue ( char* fileName, int currentIndex, char* outputWord);
 
 #endif

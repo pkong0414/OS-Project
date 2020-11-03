@@ -1,5 +1,5 @@
-racecar is a palindrome
-tacocat is a palindrome
-madam is a palindrome
-haaaah is a palindrome
-haah is a palindrome
+Process: 22298, index: 8, racecar
+Process: 22299, index: 7, tacocat
+Process: 22300, index: 6, madam
+Process: 22304, index: 2, haaaah
+Process: 22305, index: 1, haah

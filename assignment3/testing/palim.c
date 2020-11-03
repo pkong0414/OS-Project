@@ -19,7 +19,7 @@
 #define PERMS (S_IRUSR | S_IWUSR)
 
 bool isPalim( char *word, int currentIndex, int shm_id );
-void processQueue( char* filename, char* outputWord );
+void processQueue( char* filename, int currentIndex, char* outputWord );
 
 //********************* for critical section implementation **********************
 //void processQueue ( const int i, bool result, char* outputWord, int shm_id );
@@ -124,19 +124,19 @@ bool isPalim( char *word, int currentIndex, int shm_id){
             reverseCount--;
         } else {
             printf( "going into processQueue\n");
-            processQueue( "./nopalin.log", outputWord );
+            processQueue( "./nopalin.log", currentIndex, outputWord );
             return false;
         }
     }
     //returning true
     printf( "going into processQueue\n");
-    processQueue( "./palin.log", outputWord );
+    processQueue( "./palin.log", currentIndex, outputWord );
     return true;
 }
 
 //******************************* Critical Section implementation ********************************************
 
-void processQueue( char* filename, char* outputWord ) {
+void processQueue( char* filename, int currentIndex, char* outputWord ) {
     int error;
     int semVal;
     int valResult;
@@ -172,10 +172,11 @@ void processQueue( char* filename, char* outputWord ) {
 
     setsembuf(semWait, 0, -1, 0);                            // decrement element 0
     setsembuf(semSignal, 0, 1, 0);                           // increment element 0
-        if ((error = r_semop(sem_id, semWait, 1)) == -1) {
-            printf("Child failed to lock semid: %s", error);
-            return;
-        } else if (!error) {            //we were able to lock the semaphore.
+    if ((error = r_semop(sem_id, semWait, 1)) == -1) {
+        printf("Child failed to lock semid: %s", error);
+        return;
+    } else if (!error) {            //we were able to lock the semaphore.
+        while (1) {
             //*********************** Critical Section start ********************************************
             //debugging output
             printf("going into wait\n");
@@ -188,16 +189,16 @@ void processQueue( char* filename, char* outputWord ) {
             } else {
                 printf("file opened.\n");
             }
-            printf("process %d is writing to file:%s now.\n", sem_id, filename);
+            printf("process %d is writing to file:%s now.\n", getpid(), filename);
             if (strcmp(filename, "./palin.log") == 0) {
                 //true case of palindrome
-                fprintf(outFilePtr1, "%s is a palindrome\n", outputWord);
+                fprintf(outFilePtr1, "Process: %d, index: %d, %s\n", getpid(), currentIndex, outputWord);
                 printf("%s is a palindrome\n", outputWord);
                 printf("closing file...\n");
                 close(outFilePtr1);
                 waiting = false;
             } else {  //false case of palindrome
-                fprintf(outFilePtr1, "%s is not a palindrome\n", outputWord);
+                fprintf(outFilePtr1, "Process: %d, index: %d, %s\n", getpid(), currentIndex, outputWord);
                 printf("%s not is a palindrome\n", outputWord);
                 printf("closing file...\n");
                 fclose(outFilePtr1);
@@ -206,7 +207,9 @@ void processQueue( char* filename, char* outputWord ) {
             //********************** Exit section here ***********************************************
             if ((error = r_semop(sem_id, semSignal, 1)) == -1)
                 perror("Failed to unlock semid");
+            break;
         }
+    }
     //********************************** Remainder section *************************************
 
 //    if(( error = semctl( sem_id, 0, IPC_RMID)) == -1 ){

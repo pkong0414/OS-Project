@@ -1,5 +1,5 @@
-nascar is not a palindrome
-world is not a palindrome
-hello is not a palindrome
-this is not a palindrome
-Hello is not a palindrome
+Process: 22297, index: 9, nascar
+Process: 22301, index: 5, world
+Process: 22302, index: 4, hello
+Process: 22303, index: 3, this
+Process: 22306, index: 0, Hello
