@@ -19,8 +19,3 @@ Interrupts:
 File processed will populate files: palin.log and nopalin.log.
 
 These files will contain respective palindromes and non- palindromes. 
-
-ISSUES:
-
-Initially tried to create processes that fan out but defaulted back to a simpler way to create and wait processes out.
-Debugged a lot in order to get the files to process with respect to the n parameter given.

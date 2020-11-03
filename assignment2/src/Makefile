@@ -1,16 +1,29 @@
 #!/bin/bash
-#this is the make file for project 3
+#this is the make file for project 2
 
 CC = gcc
-TARGET = master
-SRC = main.c palin.c
-OBJ = palin.o
+CFLAGS = -I. -g
+TARGETS = master palimCheck
+MASTER = master
+PALIN = palimCheck
+SRC = main.c detachandremove.c sharedheap.h
+OBJ = main.o detachandremove.o
+SRC2 = palim.c
+PALIN_OBJS = palim.o
 
-$TARGET: $(OBJ)
-	$(CC) $(CPPFLAGS) -o $(TARGET) $(OBJ)
+all: $(TARGETS)
+m: $(MASTER)
+p: $(PALIN)
+
+master:  $(OBJ)
+	$(CC) -o $@ $(OBJ)
+
+palimCheck: $(PALIN_OBJS)
+	$(CC) -o $@ $(PALIN_OBJS)
 
 main.o             : main.c
-palin.o            : palin.c
+palim.o            : palim.c
+detachandremove.o  : detachandremove.c
 
 clean :
-	/bin/rm '-f' *.o $(TARGET)
+	/bin/rm '-f' *.o $(TARGETS)

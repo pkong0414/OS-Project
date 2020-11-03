@@ -19,7 +19,7 @@
 #define PERMS (S_IRUSR | S_IWUSR)
 
 bool isPalim( char *word, int currentIndex, int shm_id );
-void processQueue( char* filename, char* outputWord );
+void processQueue( char* filename, int currentIndex, char* outputWord );
 
 //********************* for critical section implementation **********************
 //void processQueue ( const int i, bool result, char* outputWord, int shm_id );
@@ -124,19 +124,19 @@ bool isPalim( char *word, int currentIndex, int shm_id){
             reverseCount--;
         } else {
             printf( "going into processQueue\n");
-            processQueue( "./nopalin.log", outputWord );
+            processQueue( "./nopalin.log", currentIndex, outputWord );
             return false;
         }
     }
     //returning true
     printf( "going into processQueue\n");
-    processQueue( "./palin.log", outputWord );
+    processQueue( "./palin.log", currentIndex, outputWord );
     return true;
 }
 
 //******************************* Critical Section implementation ********************************************
 
-void processQueue( char* filename, char* outputWord ) {
+void processQueue( char* filename, int currentIndex, char* outputWord ) {
     int error;
     int semVal;
     int valResult;
@@ -188,16 +188,16 @@ void processQueue( char* filename, char* outputWord ) {
             } else {
                 printf("file opened.\n");
             }
-            printf("sem_id: %d is writing to file:%s now.\n", sem_id, filename);
+            printf("process %d is writing to file:%s now.\n", getpid(), filename);
             if (strcmp(filename, "./palin.log") == 0) {
                 //true case of palindrome
-                fprintf(outFilePtr1, "%s is a palindrome\n", outputWord);
+                fprintf(outFilePtr1, "Process: %d, index: %d, %s\n", getpid(), currentIndex, outputWord);
                 printf("%s is a palindrome\n", outputWord);
                 printf("closing file...\n");
                 close(outFilePtr1);
                 waiting = false;
             } else {  //false case of palindrome
-                fprintf(outFilePtr1, "%s is not a palindrome\n", outputWord);
+                fprintf(outFilePtr1, "Process: %d, index: %d, %s\n", getpid(), currentIndex, outputWord);
                 printf("%s not is a palindrome\n", outputWord);
                 printf("closing file...\n");
                 fclose(outFilePtr1);

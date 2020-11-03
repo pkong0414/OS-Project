@@ -47,22 +47,22 @@ int main( int argc, char** argv){
         }
     } else {
         printf("palim.c: created a new memory segment\n");
-        sharedMem = shmat( shm_id, NULL, 0);
+        line = (char *)shmat( shm_id, NULL, 0);
 
         //for the critical section implementation
 //        sharedMem = (sharedheap) shmat( shm_id, NULL, 0);
 //        line = sharedMem.sharedString;
-        if(sharedMem == (void *) -1 ){
+        if(line == (char *) -1 ){
             perror("palim.c: shmat failed");
             exit(1);
         }
         else {
-            printf( "palim.c: shmat returned %#8.8x\n", sharedMem);
+            printf( "palim.c: shmat returned %#8.8x\n", line);
         }
     }
     //*****************************************************************
 
-    char *currentLine = sharedMem->sharedString[0];
+    char *currentLine = line;
     while(zeroCount < currentIndex){
 //        printf( "%c\n", *word);
         if( *currentLine == 0 ){
@@ -131,7 +131,7 @@ bool isPalim( char *word, int currentIndex, int shm_id){
 //            processQueue( currentIndex, false, outputWord, shm_id);
             printf("writing to file\n");
             fprintf(outFilePtr2, "%s is not a palindrome\n", outputWord);
-            printf( "%s is not a palindrome\n", outputWord);
+            printf( "%s is a palindrome\n", outputWord);
             return false;
         }
     }
@@ -192,7 +192,7 @@ bool isPalim( char *word, int currentIndex, int shm_id){
 //        if( result == false ) {
 //            printf("writing to file\n");
 //            fprintf(outFilePtr2, "%s is not a palindrome\n", outputWord);
-//            printf( "%s is not a palindrome\n", outputWord);
+//            printf( "%s is a palindrome\n", outputWord);
 //        } else {
 //            printf("writing to file\n");
 //            fprintf(outFilePtr1, "%s is a palindrome\n", outputWord);

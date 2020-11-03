@@ -1,4 +1,6 @@
 //main.c
+//Patrick Kong
+//10/09/2020
 
 #include "detachandremove.h"
 #include "sharedheap.h"
@@ -124,8 +126,8 @@ int main( int argc, char** argv){
     while ( ( c = getopt(argc, argv, "hn:s:t:" ) ) != -1 ) {
         switch (c) {
             case 'h':
-                //TODO make a printhelp function
-                break;
+                printhelp();
+                return 0;
             case 'n':
                 if( atoi(optarg) > 20 )
                     //sorry, 20 processes max.
@@ -184,13 +186,40 @@ int main( int argc, char** argv){
     } else {
         printf("created a new memory segment\n");
         sharedMem.sharedString = shmat( shm_id, NULL, 0);
-        if(sharedMem.sharedString == (char *) -1 ){
-            perror("shmat failed");
+        if(sharedMem.sharedString == -1 ){
+            perror("shmat sharedMem.sharedString failed");
         }
         else {
-            printf( "shmat returned %#8.8x\n", sharedMem.sharedString);
+            printf( "shmat sharedMem.sharedString returned %#8.8x\n", sharedMem.sharedString);
         }
+
+        //************** use to solve the Critical Section ************************
+//        sharedMem.sharedQueue = shmat( shm_id, NULL, 0);
+//        if(sharedMem.sharedQueue == -1 ){
+//            perror("shmat sharedMem.sharedQueue failed");
+//        }
+//        else {
+//            printf( "shmat sharedMem.sharedQueue returned %#8.8x\n", sharedMem.sharedQueue);
+//        }
+//        sharedMem.choosing = shmat( shm_id, NULL, 0);
+//        if(sharedMem.choosing == (char *) -1 ){
+//            perror("shmat sharedMem.choosing failed");
+//        }
+//        else {
+//            printf( "shmat sharedMem.choosing returned %#8.8x\n", sharedMem.choosing);
+//        }
+//        sharedMem.ticket = (int) shmat( shm_id, NULL, 0);
+//        if(sharedMem.ticket == (int) -1 ){
+//            perror("shmat sharedMem.ticket failed");
+//        }
+//        else {
+//            printf( "shmat sharedMem.ticket returned %#8.8x\n", sharedMem.ticket);
+//        }
     }
+
+
+//    sharedMem.choosing = malloc( sizeof(char) * 40 );
+//    sharedMem.sharedQueue = malloc( sizeof(int) * 20 );
 
     //opening file
     fPtr = fopen( argv[ argc - 1 ], "r");
@@ -226,10 +255,10 @@ int main( int argc, char** argv){
         //closing file after use
         fclose(fPtr);
 
-        printf( "outside the loop (stringsLeft): %d\n", stringsLeft);
+//        printf( "outside the loop (stringsLeft): %d\n", stringsLeft);
 
         //we'll never make more processes than the max processes allowed!
-        while( processCount < nValue ) {
+        while( (processCount - 1) < nValue ) {
 
             if( concurProcesses < sValue ) {
 
@@ -238,23 +267,15 @@ int main( int argc, char** argv){
                 //increment active processes
                 concurProcesses++;
                 stringsLeft--;
-                printf("processCount: %d\n", processCount);
-                printf("concurProcesses: %d\n", concurProcesses);
+
+                //debugging output only
+//                printf("processCount: %d\n", processCount);
+//                printf("concurProcesses: %d\n", concurProcesses);
                 printf("stringsLeft: %d\n", stringsLeft);
-                //we don't want the forking to extend beyond the end of file!
-                if (stringsLeft < 0) {
-                    printf("File is empty. Terminating program\n");
-                    if (detachandremove(shm_id, sharedMem.sharedString) == -1) {
-                        perror("failed to destroy shared memory segment\n");
-                    } else {
-                        printf("destroyed shared memory segment\n");
-                    }
-                    break;
-                }
 
                 //we don't want more processes than for what is allowed (even if nProcess is less than sValue)!
-                if (processCount == nValue) {
-                    printf("processCount: %d\n", processCount);
+                if ((processCount -1) == nValue) {
+                    printf("processCount: %d\n", processCount -1);
                     printf("Max processing limit reached!\n");
                     break;
                     //exit(42);
@@ -273,14 +294,14 @@ int main( int argc, char** argv){
                     //debugging output
                     //processCount++;
 
-                    printf("\n%d: My PID = %d\n", f, (int) getpid());
-                    printf("concurProcesses: %d\n", concurProcesses);
-                    printf("\n");
+//                    printf("\n%d: My PID = %d\n", f, (int) getpid());
+//                    printf("concurProcesses: %d\n", concurProcesses);
+//                    printf("\n");
                     char argStrings[10];
 
-                    printf("stringsLeft: %d\n", stringsLeft);
+//                    printf("stringsLeft: %d\n", stringsLeft);
                     sprintf(argStrings, "%d", stringsLeft);
-                    printf("argStrings: %s\n", argStrings);
+//                    printf("argStrings: %s\n", argStrings);
 
                     char *arguments[] = {"./palimCheck", argStrings, NULL};
                     int i;
@@ -306,25 +327,34 @@ int main( int argc, char** argv){
                         //decrementing number of processes concurrent
                         concurProcesses--;
 
+                        //we don't want the forking to extend beyond the end of file!
+                        if (stringsLeft < 0) {
+                            printf("File is empty. Terminating program\n");
+                            if (detachandremove(shm_id, sharedMem.sharedString) == -1) {
+                                perror("failed to destroy shared memory segment\n");
+                            } else {
+                                printf("destroyed shared memory segment\n");
+                            }
+                            break;
+                        }
+
                         //breaking out of the wait process when the number of concurrent processes is out
                         if(concurProcesses == 0 ){
                             break;
                         }
 
-                        //incrementing total processes created
-                        //processCount++;
-
-                        printf("processCount: %d\n", (processCount));
+                        //processCount is subtracted 1 to truly reflect the actual processCount
+                        printf("processCount: %d\n", (processCount - 1));
                         printf("process is finished!\n");
                 }
-                if(processCount == nValue){
-                    break;
-                }
+//                if(processCount == nValue){
+//                    break;
+//                }
             }
 
 
             //we don't want more processes than for what is allowed (even if nProcess is less than sValue)!
-            if(processCount == nValue){
+            if((processCount - 1) == nValue){
                 break;
             }
         }
