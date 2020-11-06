@@ -8,8 +8,8 @@ OSS = oss
 USER = user
 SRC = oss.c detachandremove.c queue.c
 OBJ = oss.o detachandremove.o queue.o
-SRC2 = user.c
-USER_OBJ = user.o
+SRC2 = user.c detachandremove.c
+USER_OBJ = user.o detachandremove.o
 
 all: $(TARGETS)
 o:   $(OSS)
