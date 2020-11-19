@@ -8,6 +8,13 @@
 //macro for max size
 #define MAXSIZE 18
 
+//queue global
+Queue *qset1[4];
+Queue *qset2[4];
+Queue *blocked;
+Queue **active;
+Queue **expired;
+
 void createQueues() {
     int i;
     for( i = 0; i < 4; i++){
@@ -60,8 +67,6 @@ void enqueue(Queue *queue, int value) {
 
 int dequeue(Queue *queue)
 {
-    printf("inside dequeue function\n");
-    printQueue( queue );
     if (queue->currentSize <= 0)
         return -1;
     int item = queue->line[queue->front];
@@ -79,29 +84,28 @@ void swapQueues() {
 void printQueue(Queue *queue) {
     int i;
     int count = 0;
-    if( queue->currentSize != 0) {
-        if (queue->front > queue->rear) {
-            //this will consider the circular case
-            for (i = queue->front; i < MAXSIZE; i++) {
-                printf("%d ", queue->line[i]);
-                count++;
-            }
-            //now we will print the end of the loop
-            for (i = queue->rear; count < queue->currentSize; i++) {
-                printf("%d ", queue->line[i]);
-                count++;
-            }
-        } else {
-            for (i = queue->front; i <= queue->rear; ++i) {
-                printf("%d ", queue->line[i]);
-            }
+    if( queue->front > queue->rear ){
+        //this will consider the circular case
+        for(i = queue->front; i < MAXSIZE; i++) {
+            printf("%d ", queue->line[i]);
+            count++;
+        }
+        //now we will print the end of the loop
+        for(i = queue->rear; count < queue->currentSize; i++) {
+            printf("%d ", queue->line[i]);
+            count++;
+        }
+    } else {
+        for (i = queue->front; i <= queue->rear; ++i) {
+            printf("%d ", queue->line[i]);
         }
     }
     printf("\n");
 }
 
-/*********************  testing purpose only *****************************
+/*********************  testing purpose only *****************************/
 void main() {
+
     createQueues();
     int i = 3;
     //this should give me an error
@@ -126,4 +130,4 @@ void main() {
     printQueue(expired[i]);
 }
 
-*************************************************************************/
+/*************************************************************************/

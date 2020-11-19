@@ -23,9 +23,8 @@ Queue* createQueue(int queueSize)
 {
     Queue* queue = (Queue*) malloc(sizeof(Queue));
     queue->queueSize = queueSize;
-    queue->front = -1;
-    queue->currentSize = 0;
-    queue->rear = -1;  // This is important, see the enqueue
+    queue->front = queue->currentSize = -1;
+    queue->rear = queue->currentSize;  // This is important, see the enqueue
     queue->line = (int*) malloc(queueSize * sizeof(int));
     return queue;
 }
@@ -33,39 +32,40 @@ Queue* createQueue(int queueSize)
 void enqueue(Queue *queue, int value) {
     //idea is to assign to the appropriate based on priority.
     //we don't need to use priority as we can just set the relevant array in the oss part of the code
-    if(queue->currentSize == queue->queueSize) {
-        printf("Queue is full\n");
-        return;
+    if(queue->currentSize<MAXSIZE)
+    {
+        if(queue->currentSize < 0)
+        {
+            queue->line[0] = value;
+            queue->front = queue->rear = 0;
+            queue->currentSize = 1;
+        }
+        else if(queue->rear == MAXSIZE-1)
+        {
+            queue->line[0] = value;
+            queue->rear = 0;
+            queue->currentSize++;
+        }
+        else
+        {
+            queue->line[queue->rear+1] = value;
+            queue->rear++;
+            queue->currentSize++;
+        }
     }
-
-    if(queue->currentSize == 0) {
-        //this case we have an empty queue.
-        queue->line[0] = value;
-        queue->front = queue->rear = 0;
-        queue->currentSize++;
-    } else if(queue->rear == MAXSIZE-1) {
-        //this is the case where the queue is almost full
-        //by assigning the rear to the beginning and giving value
-        // to the first of the line makes it circular
-        queue->line[0] = value;
-        queue->rear = 0;
-        queue->currentSize++;
-    } else {
-        //this is the normal case for the queue
-        queue->line[queue->rear+1] = value;
-        queue->rear++;
-        queue->currentSize++;
+    else
+    {
+        printf("Queue is full\n");
     }
 }
 
 int dequeue(Queue *queue)
 {
-    printf("inside dequeue function\n");
-    printQueue( queue );
     if (queue->currentSize <= 0)
         return -1;
     int item = queue->line[queue->front];
-    queue->front = (queue->front + 1) % queue->queueSize;
+    queue->front = (queue->front + 1)
+            % queue->queueSize;
     queue->currentSize = queue->currentSize - 1;
     return item;
 }
@@ -78,24 +78,8 @@ void swapQueues() {
 
 void printQueue(Queue *queue) {
     int i;
-    int count = 0;
-    if( queue->currentSize != 0) {
-        if (queue->front > queue->rear) {
-            //this will consider the circular case
-            for (i = queue->front; i < MAXSIZE; i++) {
-                printf("%d ", queue->line[i]);
-                count++;
-            }
-            //now we will print the end of the loop
-            for (i = queue->rear; count < queue->currentSize; i++) {
-                printf("%d ", queue->line[i]);
-                count++;
-            }
-        } else {
-            for (i = queue->front; i <= queue->rear; ++i) {
-                printf("%d ", queue->line[i]);
-            }
-        }
+    for (i = queue->front; i <= queue->rear; ++i) {
+        printf("%d ", queue->line[i]);
     }
     printf("\n");
 }

@@ -4,7 +4,6 @@
 #include <signal.h>
 #include <semaphore.h>
 #include <pthread.h>
-#include <stdbool.h>
 
 #ifndef SHAREDMEMORY_H
 #define SHAREDMEMORY_H
@@ -26,7 +25,6 @@ typedef struct {
 /* Proccess table and sys time shared block */
 typedef struct {
     PCB processBlock[18];
-    bool inProcess;
     struct timespec sysTime;
     int childCount;
 

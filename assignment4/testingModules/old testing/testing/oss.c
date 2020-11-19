@@ -38,7 +38,6 @@
 #include <errno.h>
 #include <semaphore.h>
 #include <pthread.h>
-#include <time.h>
 
 //macros
 #define PERM (S_IRUSR | S_IWUSR)
@@ -64,10 +63,12 @@ int findEmptyPB();
 void initProcBlocks();
 void printPCB();
 int findPCBIndex( pid_t pid );
-int printProcessState();
-int queueProcessing( pid_t *currentProcPid );
 void tellProcessResume( pid_t pid );
-void printStatus( pid_t currentProcPid);
+int printProcessState();
+int queueProcessing( bool * inProcess );
+void printStatus(bool inProcess, int currentProcPid);
+void tellProcessWait( pid_t pid );
+void messageHandling(bool *inProcess);
 
 //output file global
 FILE *outFilePtr1;
@@ -81,10 +82,17 @@ const int MAX_TIME_BETWEEN_NEW_PROCS_SEC = 1;
 const int RT_PERCENT = 80;
 
 //this value will take in seconds after which the process terminate, even if it has not finished.
-static int tValue = 10;
+static int tValue = 30;
 static int processCount = 0;
 static int maxChildren = 18;
 static int localPid = 0;
+int concurrentProc = 0;
+int priorityCases;
+
+//initializing max time limits for the queues
+const long maxQueueLimit1 = ( MILLISECOND * 10 );        //10 ms
+const long maxQueueLimit2 = ( ( ( MILLISECOND * 10 ) / 4 ) * 3 );  //2.5 * 3 = 7.5 msg
+bool inProcess = false;
 
 //Time until next execution
 struct timespec nextExec;
@@ -109,6 +117,7 @@ key_t userKey;
 key_t masterKey;
 int toUserID;
 int toMasterID;
+int messageStatus;
 
 //queue global
 Queue *qset1[4];
@@ -117,6 +126,8 @@ Queue *blocked;
 Queue **active;
 Queue **expired;
 
+//misc globals
+int currentProcIndex = 0;
 
 /* ARGUSED */
 static void myhandler( int s ) {
@@ -128,6 +139,11 @@ static void myhandler( int s ) {
     write(STDERR_FILENO, timeout, timeoutSize );
     errno = errsave;
     int i;
+
+    //waiting for max amount of children to terminate
+    for (i = 0; i <= maxChildren ; ++i) {
+        //wait(NULL);
+    }
 
     //detaching shared memory
     if( detachShared() == 0 ) {
@@ -262,12 +278,9 @@ int main( int argc, char ** argv ) {
     void initProcessState();
 
     //Queue max time limit. 3rd queue is infinity with 1.25 ms
-    //this isn't an actual time limit since RT processes maintain priority 0
     int queueTimeLimit0 = ( BASE_QUANTUM ) * MILLISECOND;
     int queueTimeLimit1 = ( BASE_QUANTUM / 2) * 2 * MILLISECOND;
     int queueTimeLimit2 = ( BASE_QUANTUM / 4) * 3 * MILLISECOND;
-
-    //this isn't an actual time limit since you cannot move down another queue
     int queueTimeLimit3 = ( BASE_QUANTUM / 8) * MILLISECOND;
 
     //TODO: we'll be making the scheduler create a PCT and one user process (of real time).
@@ -300,15 +313,17 @@ void initSharedMem(){
     if( shm_id == -1 ){
         if(errno != EEXIST){
             perror( "shared memory already exist.\n");
-
+            myhandler(1);
         } else if ( (shm_id = shmget( myKey, sizeof(sharedMem), PERM ) ) == -1) {
             perror( "shared memory exist, just can't control it\n");
+            myhandler(1);
         }
     } else {
         printf("created a new memory segment\n");
         procControl = shmat(shm_id, NULL, 0);
         if (procControl == (void *) -1) {
             perror("shmat sharedMem failed");
+            myhandler(1);
         } else {
             printf("shmat sharedMem returned %#8.8x\n", procControl);
         }
@@ -320,9 +335,8 @@ void scheduler() {
     //This function will handle the main operations of oss
     pid_t childPid;
     int index;
-    int concurrentProc = 0;
-    int messageStatus;
-    int currentProcPid;
+    pid_t currentProcPid;
+    pid_t newProcPid;
     int diceRoll;
     int status;
     int dequeueResult;
@@ -337,12 +351,7 @@ void scheduler() {
     long allowedQuantum2 = allowedQuantum1 / 2;
     long allowedQuantum3 =  allowedQuantum2 /2;
 
-    //initializing max time limits for the queues
-    long maxQueueLimit1 = ( 10* MILLISECOND );        //10 ms
-    long maxQueueLimit2 = (( maxQueueLimit1 / 4 ) * 3 );  //2.5 * 3 = 7.5 msg
-
     procControl->sysTime.tv_nsec = 0;
-    procControl->inProcess = false;
     //setting up the nanosleep timer
     // we need to set this so that sleep till be in terms of quantum
     // or 1000000 nanosecs
@@ -357,6 +366,7 @@ void scheduler() {
     printf( "nextExec.tv_nsec: %11d\n", nextExec.tv_nsec);
     procControl->sysTime.tv_nsec = 0;
 
+    inProcess = false;
     while(1) {
         gettimeofday(&tEnd, NULL);
         tDiff = (tEnd.tv_usec - tStart.tv_usec) * MICROSECOND;
@@ -373,6 +383,7 @@ void scheduler() {
                 childPid = fork();
                 if (childPid < 0) {
                     perror("failed to fork");
+                    exit(-1);
                 }
 
                 if (childPid == 0) {
@@ -388,7 +399,7 @@ void scheduler() {
 
                     //if exec failed this will print out
                     perror("exec failed\n");
-                    myhandler(1);
+                    //myhandler(1);
                 }
                 //*************************** process handling section ***************************
                 //first process is created let's initialize our nextExec
@@ -396,9 +407,9 @@ void scheduler() {
                     nextExec.tv_nsec = 0;
                     gettimeofday(&nextExecStart, NULL);
                     printf("./oss childPid: %d\n", childPid);
-                    currentProcPid = childPid;
-                    printf("./oss: currentProcPid: %d\n", currentProcPid);
-                    procControl->processBlock[index].pid = currentProcPid;
+                    newProcPid = childPid;
+                    printf("./oss: newProcPid: %d\n", newProcPid);
+                    procControl->processBlock[index].pid = newProcPid;
 
                     //determining if process is a realtime
                     diceRoll = (rand() % 100);
@@ -413,7 +424,6 @@ void scheduler() {
 
                     //initializing everything
                     procControl->processBlock[index].state = 0;
-                    procControl->processBlock[index].pid = childPid;
                     procControl->processBlock[index].localPid = processCount++;
                     procControl->processBlock[index].procCpuTime.tv_nsec = 0;
                     procControl->processBlock[index].procCpuTime.tv_sec = 0;
@@ -424,21 +434,38 @@ void scheduler() {
                     procControl->processBlock[index].procWaitTime.tv_nsec = 0;
                     procControl->processBlock[index].procWaitTime.tv_sec = 0;
 
-                    //this will put the newly exec'd proccess in queue and in wait
-                    if (procControl->processBlock[index].queueID == 0) {
+                    printStatus(inProcess, newProcPid);
+                    if (inProcess == true) {
+                        //this will put the newly exec'd proccess in queue and in wait
+                        if (procControl->processBlock[index].queueID == 0) {
+                            procControl->processBlock[index].state = 0;
+                            messageHandling(&inProcess);
+                            printf("active[0] line size: %d\n", active[0]->currentSize);
+                            printf("active[0] line:\n");
+                            printQueue(active[0]);
+                            printProcessState();
+                        } else {
+
+                            procControl->processBlock[index].state = 0;
+//                            enqueue(active[1], newProcPid);
+                            messageHandling(&inProcess);
+                            printf("active[1] line size: %d\n", active[1]->currentSize);
+                            printf("active[1] line:\n");
+                            printQueue(active[1]);
+                            printProcessState();
+                        }
+                    } else if (inProcess == false) {
+                        //no process is running
+                        // if it is in process can be possibilities:
+                        // 1. The first process created
+                        // 2. a process terminated and a process is created.
                         procControl->processBlock[index].state = 0;
-                        enqueue(active[0], procControl->processBlock[index].pid);
-                        printf("active[0] line size: %d\n", active[0]->currentSize);
-                        printf("active[0] line:\n");
-                        printQueue(active[0]);
-                        printProcessState();
-                    } else {
-                        procControl->processBlock[index].state = 0;
-                        enqueue(active[1], procControl->processBlock[index].pid);
-                        printf("active[1] line size: %d\n", active[1]->currentSize);
-                        printf("active[1] line:\n");
-                        printQueue(active[1]);
-                        printProcessState();
+                        printf("./oss 464: processBlock[ %d ] pid: %d\n",
+                               index, procControl->processBlock[index].pid);
+//                        enqueue(active[procControl->processBlock[index].queueID],newProcPid );
+                        printQueue(active[procControl->processBlock[index].queueID]);
+                        messageHandling(&inProcess);
+                        printf("first process created PID: %d\n", newProcPid);
                     }
 
                     //outputting to file
@@ -456,169 +483,24 @@ void scheduler() {
                     kill(childPid, SIGTERM);
                 }
             }
-
-
         }
-
-        //for now let's leave it, it seems the process has to communicate to oss on waiting.
-        int priorityCases = procControl->processBlock[index].queueID;
-        //exit process fix this later
-        //receiving message that a process wants to terminate itself
-//        printf("./oss: currentProcPid: %d\n", currentProcPid);
-//        printProcessState();
-//        printf( "active 0: \n");
-//        printQueue( active[0] );
-//        printf( "active 1: \n");
-//        printQueue( active[1] );
-//        printf( "active 2: \n");
-//        printQueue( active[2] );
-//        printf( "active 3: \n");
-//        printQueue( active[3] );
-//        printf( "expired 1: \n");
-//        printQueue( expired[1] );
-//        printf( "expired 2: \n");
-//        printQueue( expired[2] );
-//        printf( "expired 3: \n");
-//        printQueue( expired[3] );
-//        printPCB();
-//        printf("inProcess: %d\n", procControl->inProcess);
-            if ((messageStatus = msgrcv(toMasterID, &message, sizeof(message),
-                                        currentProcPid, 0) > -1)) {
-                printf("./oss: PID: %d, message: %s\n", message.mesg_type, message.mesg_text);
-                if (strcmp(message.mesg_text, "PROC_TERM") == 0) {
-                    //receiving messages of termination
-                    printf("./oss PID: %d has terminated!\n", message.mesg_type);
-                    //handle the termination stuff here.
-                }
-                if (strcmp(message.mesg_text, "PROC_WAIT") == 0) {
-                    //receiving termination message from a process
-                    printf("./oss WAIT: message received from %d: %s\n", message.mesg_type, message.mesg_text);
-                    printf("process is waiting\n");
-                    printf("checking queue now to put into processing");
-                    currentProcPid = message.mesg_type;
-                    index = findPCBIndex(currentProcPid);
-                    priorityCases = procControl->processBlock[index].queueID;
-                    //we are not processing at this time.
-                    printf("inProcess: %d\n", procControl->inProcess);
-                    //sending checking in message to master
-                    printf("procControl->processBlock[ %d ].queueID: %d\n",
-                           index, procControl->processBlock[index].queueID);
-                    switch (priorityCases) {
-                        printf("./oss: looking at priorities right now\n");
-                        case 0:
-                            if (procControl->processBlock[index].procCpuTime.tv_nsec >= (10 * MILLISECOND)) {
-                                /*************************** Queueing section ****************************/
-                                //in the case of RT processes we end up immediately pulling the next one.
-                                //queueing RT process to queue 0;
-                                printf("enqueuing: %d\n", currentProcPid);
-                                procControl->inProcess = false;
-                                procControl->processBlock[index].state = 0;
-                                enqueue(active[0], currentProcPid);
-                                printf("printing active queue0: ");
-                                printQueue(active[0]);
-                                printPCB();
-                                printProcessState();
-                                queueProcessing(&currentProcPid);
-                                break;
-                            } else {
-                                queueProcessing(&currentProcPid);
-                            }
-                        case 1:
-                            if (procControl->processBlock[index].procCpuTime.tv_nsec >= maxQueueLimit1) {
-                                //penalizing the process for taking too long
-                                //process will move to expired queue 2
-                                printf("enqueuing: %d to expired queue2\n", currentProcPid);
-                                procControl->processBlock[index].queueID = 2;
-                                procControl->processBlock[index].state = 0;
-                                enqueue(expired[2], currentProcPid);
-                                procControl->inProcess = false;
-                                printProcessState();
-                                queueProcessing(&currentProcPid);
-                                break;
-                            } else if (procControl->processBlock[index].procCpuTime.tv_nsec >= (5 * MILLISECOND)) {
-                                printf("enqueuing: %d to expired queue1\n", currentProcPid);
-                                procControl->processBlock[index].state = 0;
-                                enqueue(expired[1], currentProcPid);
-                                procControl->inProcess = false;
-                                printProcessState();
-                                queueProcessing(&currentProcPid);
-                                break;
-                            }
-                        case 2:
-                            /*************************** Queueing section ****************************/
-                            if (procControl->processBlock[index].procCpuTime.tv_nsec >= maxQueueLimit2) {
-                                //penalizing the process for taking too long
-                                //process will move to expired queue 3
-
-                                printf("enqueuing: to expired queue3%d\n", currentProcPid);
-                                procControl->processBlock[index].queueID = 3;
-                                procControl->processBlock[index].state = 0;
-                                enqueue(expired[3], currentProcPid);
-                                procControl->inProcess = false;
-                                printProcessState();
-                                queueProcessing(&currentProcPid);
-                                break;
-                            } else if (procControl->processBlock[index].procCpuTime.tv_nsec >= (2.5 * MILLISECOND)) {
-                                printf("enqueuing: to expired queue2%d\n", currentProcPid);
-                                enqueue(expired[2], currentProcPid);
-                                procControl->processBlock[index].state = 0;
-                                procControl->inProcess = false;
-                                printProcessState();
-                                queueProcessing(&currentProcPid);
-                                break;
-                            }
-                        case 3:
-                            //we'll never put RT in expired or move it down
-                            if (procControl->processBlock[index].procCpuTime.tv_nsec >= (1.25 * MILLISECOND)) {
-                                //queueing priority 3 process to queue 3
-                                printf("enqueuing: to expired queue3%d\n", currentProcPid);
-                                enqueue(expired[3], procControl->processBlock[index].pid);
-                                procControl->processBlock[index].state = 0;
-                                procControl->inProcess = false;
-                                printProcessState();
-                                queueProcessing(&currentProcPid);
-                                break;
-                            }
-
-                    }
-                    printf("currentProcessPID: %d\n", currentProcPid);
-                    printProcessState();
-                    printf("active 0: \n");
-                    printQueue(active[0]);
-                    printf("active 1: \n");
-                    printQueue(active[1]);
-                    printf("active 2: \n");
-                    printQueue(active[2]);
-                    printf("active 3: \n");
-                    printQueue(active[3]);
-                    printf("expired 1: \n");
-                    printQueue(expired[1]);
-                    printf("expired 2: \n");
-                    printQueue(expired[2]);
-                    printf("expired 3: \n");
-                    printQueue(expired[3]);
-                    printPCB();
-                    printf("inProcess: %d\n", procControl->inProcess);
-                }
-            }
-
-//        if ((messageStatus = msgrcv(toMasterID, &message, sizeof(message),
-//                                        message.mesg_type, MSG_NOERROR | IPC_NOWAIT) > -1)) {
-//
-        int status;
+        messageHandling( &inProcess );
         pid_t pid;
-
-        if ((pid = waitpid((pid_t) -0, &status, WNOHANG)) > 0) {
-            //if a PID is returned meaning the child died
-
+        if ((pid = waitpid((pid_t)-1, &status, WNOHANG)) > 0) //if a PID is returned meaning the child died
+        {
             if (WIFEXITED(status)) {
-
-                if (WEXITSTATUS(status) == 14) {
+                if (WEXITSTATUS(status) == 0) //21 is my custom return val
+                {
+                    pid_t currentProc;
+                    int index;
+                    printf("process %d has terminated\n", pid);
                     //receiving termination message from a process
-                    currentProcPid = pid;
-                    index = findPCBIndex(currentProcPid);
-                    printf("currentProcPid: %d\n", currentProcPid);
+                    printf("./oss TERM: message received from %d: %s\n", message.mesg_pid, message.mesg_text);
+                    currentProc = message.mesg_pid;
+                    index = findPCBIndex( pid );
+                    printf("currentProcPid: %d\n", pid);
                     printf("process is terminating...\n");
+
 
                     //if a PID is returned meaning the child died
                     concurrentProc--;
@@ -637,18 +519,14 @@ void scheduler() {
                     //taking the localPid tag off of the processBlock
                     if (currentProcPid > -1) {
                         --concurrentProc;
-                        procControl->inProcess = false;
-                        procControl->processBlock[index].state = 0;
-                        procControl->processBlock[index].localPid = -1;
-                        procControl->processBlock[index].pid = -1;
-                        printf("PID returned. Post terminate status report: \n");
-                        printPCB();
-                        printStatus(currentProcPid);
+                        inProcess = false;
+                        printf("PID returned.\n");
+                        printStatus(inProcess, currentProcPid);
+                        queueProcessing( &inProcess );
                     }
                 }
             }
         }
-
 
 
         //******************* end of the while loop **************************
@@ -661,10 +539,8 @@ void scheduler() {
         nextExec.tv_nsec += tDiff;
         //printf( "nextExec.tv_nsec: %ld\n", nextExec.tv_nsec);
 
-        if( concurrentProc < 1) {
-            nextExec.tv_nsec = MAX_TIME_BETWEEN_NEW_PROCS_NS;
-        }
-        if(processCount == 100){
+        if(concurrentProc < 0){
+            printf("./oss: concurrentProc: %d\n", concurrentProc);
             myhandler(1);
             exit(0);
         }
@@ -752,7 +628,6 @@ void printPCB(){
     for( i = 0; i < maxChildren; i++) {
         printf("%d ", procControl->processBlock[i].pid);
     }
-
     printf( "\n" );
 }
 
@@ -766,7 +641,7 @@ void initProcBlocks(){
 void initProcessState(){
     int i;
     for( i = 0; i < maxChildren; i++)
-        procControl->processBlock[i].state = -1;
+        procControl->processBlock[i].state = 0;
 }
 
 int findPCBIndex(pid_t pid){
@@ -793,76 +668,46 @@ int printProcessState(){
     return clear;
 }
 
-int queueProcessing( pid_t *currentProcPid ) {
+int queueProcessing( bool *inProcess ) {
     int count = 0;
+    int index;
     int dequeueResult;
-    printf("inside queueProcessing");
-    printStatus(*currentProcPid);
+    int currentProcPid;
 
+    printf( "./oss queueProcessing: inProcess\n", &inProcess);
     //this will handle the case of terminated process
     //as well as cases of empty queues.
-    while( procControl->inProcess == false ) {
-        if (procControl->inProcess == false) {
+    while( *inProcess == false ) {
             printf("./oss: checking queues now\n");
             //nothing is processing. Time to look for things in queue and set them to process.
             //we won't check for queue 0 since the queueing process would empty RT processes
-            if (((dequeueResult = dequeue(active[0])) == -1) && procControl->inProcess == false) {
+            if (((dequeueResult = dequeue(active[0])) == -1)) {
                 printf("there's nothing in queue 0\n");
-            } else {
-                //assigning results to currentProcPid
-                *currentProcPid = dequeueResult;
-                //getting the current PCB index of the process
-                //telling the process to continue processing
-                tellProcessResume(*currentProcPid);
-                //we are now processing
-                procControl->inProcess = true;
-                printQueue(active[0]);
-                printProcessState();
-                return 0;
-            }
-            if (((dequeueResult = dequeue(active[1])) == -1) && procControl->inProcess == false) {
+            } else if (((dequeueResult = dequeue(active[1])) == -1)) {
                 printf("There is no processes in queue 1\n");
-            } else {
-                //we'll have the first number in queue 1 assigned to currentProcPid
-                *currentProcPid = dequeueResult;
-                tellProcessResume(*currentProcPid);
-                procControl->inProcess = true;
-                printQueue(active[1]);
-                printProcessState();
-                return 0;
-            }
-            if (((dequeueResult = dequeue(active[2])) == -1) && procControl->inProcess == false) {
+            } else if (((dequeueResult = dequeue(active[2])) == -1)) {
                 printf("There is no processes in queue 2\n");
-            } else {
-                //we'll have the first number in queue 2 assigned to currentProcPid
-                *currentProcPid = dequeueResult;
-                tellProcessResume(*currentProcPid);
-                procControl->inProcess = true;
-                printQueue(active[2]);
-                printProcessState();
-                return 0;
-            }
-            if (((dequeueResult = dequeue(active[3])) == -1) && procControl->inProcess == false) {
+            } else if (((dequeueResult = dequeue(active[3])) == -1)) {
                 printf("There is no processes in queue 3\n");
             } else {
-                //we'll have the first number in queue 3 assigned to currentProcPid
-                *currentProcPid = dequeueResult;
-                tellProcessResume(*currentProcPid);
-                procControl->inProcess = true;
-                printQueue(active[3]);
-                printProcessState();
+                //assigning results to currentProcPid
+                currentProcPid = dequeueResult;
+                index = findPCBIndex( currentProcPid );
+                printf("FOUND: in queue\n" );
+//               procControl->processBlock[index].state = 1;
+                //telling the process to continue processing
+                tellProcessResume(currentProcPid);
+                //we are now processing
+                *inProcess = true;
                 return 0;
             }
             //swapping queue before starting the queue search again
-            if (procControl->inProcess == false) {
-                if( count >=2 ){
-                    return -1;
-                }
-                printf("swapping queues now\n");
-                swapQueues();
-                count++;
+            if( count >=2 ){
+                return -1;
             }
-        }
+            printf("swapping queues now\n");
+            swapQueues();
+            count++;
     }
 }
 
@@ -870,17 +715,18 @@ void tellProcessResume( pid_t pid ){
     printf("./oss: process currently waiting... sending RESUME message to PID: %d\n",
            pid);
     strcpy(message.mesg_text, "PROC_RESUME");
-    message.mesg_type = pid;
-    printf("./oss: sending pid:%d tellProcessResume message: %s\n", pid, message.mesg_text);
+    message.mesg_type = 1;
+    message.mesg_pid = pid;
+    printf("./oss: sending pid:%d message: %s\n", pid, message.mesg_text);
     //sending terminate message to master
-    if( msgsnd(toUserID, &message, sizeof(message), 0) == -1){
+    if( msgsnd(toUserID, &message, sizeof(message), IPC_NOWAIT) == -1){
         perror("send_message");
         exit(1);
     }
     return;
 }
 
-void printStatus( pid_t currentProcPid) {
+void printStatus(bool inProcess, pid_t currentProcPid) {
     printf("currentProcessPID: %d\n", currentProcPid);
     printProcessState();
     printf( "active 0: \n");
@@ -898,5 +744,170 @@ void printStatus( pid_t currentProcPid) {
     printf( "expired 3: \n");
     printQueue( expired[3] );
     printPCB();
-    printf("inProcess: %d\n", procControl->inProcess);
+    printf("inProcess: %d\n", inProcess);
+}
+
+void tellProcessWait( pid_t pid ) {
+    //debugging output
+//    printf("./user PID: %d, cpuTime: %ld ns\n", pid,
+//           procControl->processBlock[index].procCpuTime.tv_nsec);
+//    printf("./user PID: %d, runtime: %ld ns\n", pid,
+//           runtime.tv_nsec);
+
+    message.mesg_type = 1;
+    message.mesg_pid = pid;
+    strcpy(message.mesg_text, "PROC_WAIT");
+    printf("./oss: sending WAIT message to %d: %s\n",
+           pid, message.mesg_text);
+    if( msgsnd(toUserID, &message, sizeof(message.mesg_text), IPC_NOWAIT) == -1){
+        perror("send_message");
+        exit(1);
+    }
+}
+
+bool stateClear() {
+    int i;
+    for( i = 0; i < maxChildren; i++ ){
+        if( procControl->processBlock[i].state == 1 ){
+            printf("something is currently processing.\n");
+            return false;
+        }
+    }
+    printf("state is all clear\n");
+    return true;
+}
+
+void messageHandling( bool *inProcess ){
+    int pid;
+    int index;
+    int priorityCases;
+    if ((messageStatus = msgrcv(toMasterID, &message, sizeof(message),
+                                message.mesg_type, IPC_NOWAIT) > -1)) {
+//        if (strcmp(message.mesg_text, "TERMINATE") == 0) {
+//            //receiving termination message from a process
+//            printf("./oss TERM: message received from %d: %s\n", message.mesg_pid, message.mesg_text);
+//            currentProcPid = message.mesg_pid;
+//            index = findPCBIndex( currentProcPid );
+//            printf("currentProcPid: %d\n", currentProcPid);
+//            printf("process is terminating...\n");
+//
+//
+//            //if a PID is returned meaning the child died
+//            concurrentProc--;
+//            printf("processCount: %d\n", processCount);
+//            printf("concurrentProc: %d\n", concurrentProc);
+//            printf("currentProcIndex: %d\n", currentProcIndex);
+//
+//            //we'll need to store long numbers
+//            long time1;
+//            long time2;
+//            long time3;
+//            long totalTime1;
+//            long totalTime2;
+//            struct timespec waitReportTime;
+//
+//            //taking the localPid tag off of the processBlock
+//            if (currentProcPid > -1) {
+//                --concurrentProc;
+//                *inProcess = false;
+//                printf("PID returned.\n");
+//                printStatus(*inProcess, currentProcPid);
+//                queueProcessing( &*inProcess );
+//            }
+//        }
+
+        if (strcmp(message.mesg_text, "PROC_WAIT") == 0) {
+            //receiving termination message from a process
+            printf("./oss WAIT: message received from %d: %s\n", message.mesg_pid, message.mesg_text);
+            printf("process is waiting\n");
+            printf("checking queue now to put into processing\n");
+            pid = message.mesg_pid;
+            index = findPCBIndex ( pid );
+            priorityCases = procControl->processBlock[index].queueID;
+            //we are not processing at this time.
+            if( stateClear() ){
+                *inProcess = false;
+            } else {
+                *inProcess = true;
+            }
+            printf("inProcess: %d\n", *inProcess);
+            //sending checking in message to master
+            printf("procControl->processBlock[ %d ].queueID: %d\n",
+                   index, procControl->processBlock[index].queueID);
+            printf("priorityCases: %d\n", priorityCases);
+            printf("./oss: looking at priorities right now\n");
+            if( priorityCases == 0 ) {
+                /*************************** Queueing section ****************************/
+                //in the case of RT processes we end up immediately pulling the next one.
+                //queueing RT process to queue 0;
+                printf("enqueuing: %d\n", pid);
+//                procControl->processBlock[index].state = 0;
+                enqueue(active[0], pid);
+                printf("printing active queue0: ");
+                printQueue(active[0]);
+                printPCB();
+                printStatus(*inProcess, pid);
+                printf("inProcess: %d\n", *inProcess);
+                if (*inProcess == false) {
+                    queueProcessing(&*inProcess);
+                }
+            }else if( priorityCases == 1 ) {
+                if (procControl->processBlock[index].procCpuTime.tv_nsec >= maxQueueLimit1) {
+                    //penalizing the process for taking too long
+                    //process will move to expired queue 2
+                    printf("enqueuing: %d to expired queue2\n", pid);
+                    procControl->processBlock[index].queueID = 2;
+//                    procControl->processBlock[index].state = 0;
+                    enqueue(expired[2], pid);
+                    printStatus(*inProcess, pid);
+                    if (*inProcess == false) {
+                        queueProcessing(&*inProcess);
+                    }
+                } else if (procControl->processBlock[index].procCpuTime.tv_nsec >= (5 * MILLISECOND)) {
+                    printf("enqueuing: %d to expired queue1\n", pid);
+//                    procControl->processBlock[index].state = 0;
+                    enqueue(expired[1], pid);
+                    printStatus(*inProcess, pid);
+                    if (*inProcess == false) {
+                        queueProcessing(&*inProcess);
+                    }
+                }
+            }else if( priorityCases == 2 ) {
+                /*************************** Queueing section ****************************/
+                if (procControl->processBlock[index].procCpuTime.tv_nsec >= maxQueueLimit2) {
+                    //penalizing the process for taking too long
+                    //process will move to expired queue 3
+
+                    printf("enqueuing: %d to expired queue3 \n", pid);
+                    procControl->processBlock[index].queueID = 3;
+//                    procControl->processBlock[index].state = 0;
+                    enqueue(expired[3], pid);
+                    printStatus(*inProcess, pid);
+                    if (*inProcess == false) {
+                        queueProcessing(&*inProcess);
+                    }
+                } else if (procControl->processBlock[index].procCpuTime.tv_nsec >= (2.5 * MILLISECOND)) {
+                    printf("enqueuing: %d to expired queue2 \n", pid);
+                    enqueue(expired[2], pid);
+//                    procControl->processBlock[index].state = 0;
+                    printStatus(*inProcess, pid);
+                    if (*inProcess == false) {
+                        queueProcessing(&*inProcess);
+                    }
+                }
+            }else if( priorityCases == 3 ) {
+                //we'll never put RT in expired or move it down
+                if (procControl->processBlock[index].procCpuTime.tv_nsec >= (1.25 * MILLISECOND)) {
+                    //queueing priority 3 process to queue 3
+                    printf("enqueuing: %d to expired queue3 \n", pid);
+                    enqueue(expired[3], procControl->processBlock[index].pid);
+                    procControl->processBlock[index].state = 0;
+                    printStatus(inProcess, pid);
+                    if (*inProcess == false) {
+                        queueProcessing(&*inProcess);
+                    }
+                }
+            }
+        }
+    }
 }

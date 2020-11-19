@@ -18,7 +18,7 @@
 
 //macros
 #define PERM (S_IRUSR)
-#define MAXCPUTIME 150000
+#define MAXPROCESSLIMIT 30000000
 #define SECOND 1000000000
 #define MILLISECOND 1000000
 #define MICROSECOND 1000
@@ -27,8 +27,10 @@
 int findPCBIndex( int myPid );
 void initSharedMem();
 void initMsgQueue();
+void printPCBState();
 void processWait( int pid );
 int detachShared();
+void messageReceive(int pid);
 
 // structure for message queue
 struct mesg_buffer {
@@ -45,8 +47,9 @@ long runtimeDiff;
 struct timeval waitStart;
 struct timeval waitEnd;
 long waitDiff;
+sig_atomic_t volatile wait;
 int tValue = 3;
-bool wait;
+struct sigaction sigact;
 
 //message queue globals
 key_t userKey;
@@ -63,20 +66,36 @@ sharedMem *procControl = NULL;
 
 //kill signal handler
 static void myKillSignalHandler( int s ){
-    char timeout[] = "./user: caught ctrl+c, ending processes.\n";
+    char timeout[] = "./user: SIGINT caught\n";
     int timeoutSize = sizeof( timeout );
     int errsave;
 
     errsave = errno;
     write(STDERR_FILENO, timeout, timeoutSize );
     errno = errsave;
+    wait = false;
 
-    //destroying message queues
-    msgctl(toUserID, IPC_RMID, NULL);
-    msgctl(toMasterID, IPC_RMID, NULL);
+//    //destroying message queues
+//    msgctl(toUserID, IPC_RMID, NULL);
+//    msgctl(toMasterID, IPC_RMID, NULL);
 
-    printf( "./user: destroyed message queues\n");
-    exit(0);
+    //printf( "./user: destroyed message queues\n");
+    //exit(0);
+}
+
+static void catcher( int sig ){
+    //this will handle resuming messages from the user./
+    switch(sig) {
+        case SIGTSTP:
+            printf("Pausing %d\n", getpid());
+            wait = true;
+            break;
+        case SIGCONT:
+            printf("Resuming %d\n", getpid());
+            wait = false;
+            break;
+
+    }
 }
 
 //signal interrupt
@@ -84,7 +103,8 @@ static int setupUserInterrupt( void ){
     struct sigaction act;
     act.sa_handler = myKillSignalHandler;
     act.sa_flags = 0;
-    return (sigemptyset(&act.sa_mask) || sigaction(SIGINT, &act, NULL));
+    return (sigemptyset(&act.sa_mask) || sigaction(SIGINT, &act, NULL)
+            || sigaction(SIGCONT,&act,NULL));
 }
 
 int main( int argc, char** argv ) {
@@ -93,114 +113,142 @@ int main( int argc, char** argv ) {
         perror( "./user: failed to set up a user kill signal.\n");
         return 1;
     }
-
     procControl = (sharedMem *)malloc(sizeof(sharedMem));
 
-    pid_t userPid = getpid();
-    printf( "userPid: %d\n", userPid);
-    int index;
-    int diceRoll;
-    srand(time(0));
-    printf( "inside process: %d\n",(int)getpid() );
     //initializing message queue
     initMsgQueue();
     initSharedMem();
+
+    pid_t userPid = getpid();
+    int index;
     if( ( index = findPCBIndex( userPid ) ) == -1){
-        printf("./user: ERROR did not find the correct index.\n");
+        printf("./user: error: index: %d\n", index);
+        return 1;
     }
     int priorityID = procControl->processBlock[index].queueID;
-    struct timeval tStart, tEnd, tCurrentStart, tCurrentEnd;
+    int diceRoll;
+
+    srand(time(0));
+    printf( "inside process: %d\n", userPid );
+    printf("./user priorityID: %d\n", priorityID);
+
+    struct timeval tStart;
+    struct timeval tEnd;
+    struct timeval tCurrentStart;
+    struct timeval tCurrentEnd;
     long tDifference;
     int queueProcessResult;
-    long maxTime = MAXCPUTIME;
-    int termPercent;
-
-    //getting time for start.
-    gettimeofday(&tStart, NULL);
-    printf("myLocalIndex: %d\n", index);
-    message.mesg_type = userPid;
-    runtime.tv_nsec = 0;
-    processWait(userPid);
-
-    long allowedQuantum0 = ( 10 * MILLISECOND );
+    int termPercent = 9995;
+    long allowedQuantum0 = 1 * MILLISECOND;
     long allowedQuantum1 = allowedQuantum0 / 2;
     long allowedQuantum2 = allowedQuantum1 / 2;
     long allowedQuantum3 = allowedQuantum2 / 2;
+    wait = true;
     int processQuantum;
     //we need to set up a quantum count for the process itself
     if (priorityID == 0) {
         processQuantum = allowedQuantum0;
-        termPercent = 40;
     } else if (priorityID == 1) {
         processQuantum = allowedQuantum1;
-        termPercent = 85;
     } else if (priorityID == 2) {
         processQuantum = allowedQuantum2;
-        termPercent = 85;
     } else if (priorityID == 3) {
         processQuantum = allowedQuantum3;
-        termPercent = 85;
     }
 
+    processWait(userPid);
+    printPCBState();
+    messageReceive(userPid);
+
     while(1) {
-        gettimeofday(&runtimeStart, NULL);
+        //processWait(userPid);
         //we'll just keep rolling the dice till we get terminate
-        diceRoll = (rand() % 100);
-        printf("rolled number: %d\n", diceRoll);
-        if ((procControl->processBlock[index].procCpuTime.tv_nsec >= maxTime) || diceRoll >= termPercent ) {
+        //for now we'll experiment with this
+        if ((messageStatus = msgrcv(toUserID, &message, sizeof(message.mesg_text),
+                                    message.mesg_type, 0) >= 0)) {
+            //receiving PROC_RESUME message from a process
+            printf("./user %d: PROC_RESUME message received: %s\n", userPid, message.mesg_text);
+            if (strcmp(message.mesg_text, "PROC_RESUME") == 0) {
+                //we are handling the case of resume
+                gettimeofday(&waitEnd, NULL);
+                waitDiff = (waitEnd.tv_usec - waitStart.tv_usec) * MICROSECOND;
+                procControl->processBlock[index].procWaitTime.tv_nsec += waitDiff;
+                procControl->processBlock[index].procSysTime.tv_nsec += waitDiff;
+                procControl->processBlock[index].state = 1;
+                printf("PID %d:process is resuming...\n", userPid);
+                //resetting runtime
+                runtime.tv_nsec = 0;
+            }
+        }
+
+        //getting time for start.
+        gettimeofday( &tStart, NULL );
+        printf("./user line 168: index: %d\n", index);
+        gettimeofday(&runtimeStart, NULL);
+
+        diceRoll = (rand() % 10000);
+        //printf("rolled number: %d\n", diceRoll);
+        if (diceRoll >= termPercent || (procControl->processBlock[index].procCpuTime.tv_nsec >= MAXPROCESSLIMIT )) {
             //termination works, so now we'll disable this to get scheduling with the queue working.
             //the case of termination
-            printf("Terminating userPid: %d\n", userPid);
-            strcpy(message.mesg_text, "PROC_TERM");
-            message.mesg_type = userPid;
-            message.mesg_pid = userPid;
-            //sending terminate message to master
-            if( msgsnd(toMasterID, &message, sizeof(message), 0) == -1){
-                perror("send_message");
-                exit(1);
-            }
-            printf("./user: TERMINATE message sent...\n");
+            printf("number greater than %d. Terminating userPid: %d\n", termPercent, userPid);
+//            strcpy(message.mesg_text, "TERMINATE");
+//            message.mesg_type = 1;
+//            message.mesg_pid = userPid;
+//            //sending terminate message to master
+//            if( msgsnd(toMasterID, &message, sizeof(message), 0) == -1){
+//                perror("send_message");
+//                exit(1);
+//            }
+//            printf("./user: TERMINATE message sent...\n");
 
             gettimeofday(&tEnd, NULL);
 
             //calculating system time
-            tDifference = (((long)(tEnd.tv_usec - tStart.tv_usec))* MICROSECOND);
-            printf("147 tDifference: %ld\n", tDifference);
+            tDifference = (tEnd.tv_usec - tStart.tv_usec) * MICROSECOND;
             procControl->processBlock[index].procSysTime.tv_nsec = tDifference;
 
-            procControl->sysTime.tv_nsec = tDifference;
             //calculating runtime for the last time
-            gettimeofday(&runtimeEnd, NULL);
+            gettimeofday( &runtimeEnd, NULL );
             runtimeDiff = (runtimeEnd.tv_usec - runtimeStart.tv_usec) * MICROSECOND;
-            printf("154 runtimeDiff: %ld\n", runtimeDiff);
             runtime.tv_nsec += runtimeDiff;
-            procControl->processBlock[index].procCpuTime.tv_nsec += runtimeDiff;
-            procControl->sysTime.tv_nsec += runtimeDiff;
+            procControl->processBlock[index].procCpuTime.tv_nsec = runtime.tv_nsec;
+            procControl->processBlock[index].state = 0;
+            procControl->processBlock[index].localPid = -1;
+            procControl->processBlock[index].pid = -1;
 
             //adding the time difference to CPU
-            printf("./user PID: %d, cpuTime: %ld ns\n", userPid,
-                   procControl->processBlock[index].procCpuTime.tv_nsec);
-            printf("./user PID: %d, sysTime: %ld ns\n", userPid,
-                   procControl->processBlock[index].procSysTime.tv_nsec);
-            exit(14);
+//            printf("./user PID: %d, cpuTime: %ld ns\n", userPid,
+//                   procControl->processBlock[index].procCpuTime.tv_nsec);
+//            printf("./user PID: %d, sysTime: %ld ns\n", userPid,
+//                   procControl->processBlock[index].procSysTime.tv_nsec);
+            exit(0);
         } else if (diceRoll >= 0 && diceRoll < termPercent) {
             //the case of just processing
+            printf("number is: %d. Processing...\n", diceRoll);
 
+//            printf("./user PID: %d, cpuTime: %ld ns\n", userPid,
+//                   procControl->processBlock[index].procCpuTime.tv_nsec);
+
+            printf("./user PID: %d, runtime: %ld ns\n", userPid,
+                   runtime.tv_nsec);
+            printf("./user PID: %d, processQuantum: %ld ns\n", userPid,
+                   processQuantum);
             gettimeofday( &runtimeEnd, NULL );
             runtimeDiff = (runtimeEnd.tv_usec - runtimeStart.tv_usec) * MICROSECOND;
             runtime.tv_nsec += runtimeDiff;
             procControl->processBlock[index].procSysTime.tv_nsec += runtimeDiff;
             procControl->processBlock[index].procCpuTime.tv_nsec += runtimeDiff;
-
-            printf("number is: %d. Processing...\n", diceRoll);
-            printf("./user PID: %d, cpuTime: %ld ns\n", userPid,
-                   procControl->processBlock[index].procCpuTime.tv_nsec);
-            printf("./user runtime nanosecs: %d\n", runtime.tv_nsec);
-            if( runtime.tv_nsec >= processQuantum ) {
+            if (runtime.tv_nsec >= processQuantum) {
+                //we are now going to wait because our quantum expired
                 processWait(userPid);
+//                messageReceive(userPid);
             }
+            gettimeofday(&runtimeStart, NULL);
+
         }
     }
+    exit(0);
 }
 
 //initializes shared memory
@@ -272,18 +320,27 @@ void initMsgQueue(){
 }
 
 //function for finding pid from the PCB in the PCT
+void printPCBState() {
+    int i;
+    printf("processBlock state:\n");
+    //debugging output
+    for (i = 0; i < 18; i++) {
+        printf("%d ", procControl->processBlock[i].state);
+    }
+}
+
+//function for finding pid from the PCB in the PCT
 int findPCBIndex( pid_t myPid ){
     int i;
-
+    printf("processBlock pid:\n");
     //debugging output
-//    for( i = 0; i < 18; i++) {
-//        printf( "pct->processBlock[ %d ].pid: %d\n",
-//                i, pct->processBlock[ i ].pid);
-//    }
+    for( i = 0; i < 18; i++) {
+        printf( "%d ", procControl->processBlock[ i ].pid);
+    }
 
     printf( "myPid: %d\n", myPid );
-    for( i = 0; i <= 18; i++ ){
-        if( procControl->processBlock[ i ].pid == (int)myPid ){
+    for( i = 0; i < 18; i++ ){
+        if( procControl->processBlock[ i ].pid == myPid ){
             return i;
         }
     }
@@ -293,45 +350,74 @@ int findPCBIndex( pid_t myPid ){
 
 void processWait( pid_t pid ) {
     int index = findPCBIndex(pid);
-    int priorityID = procControl->processBlock[index].queueID;
-    printf("./user priorityID: %d\n", priorityID);
 
-    //we are now going to wait because our quantum expired
-    message.mesg_type = pid;
+    //debugging output
+//    printf("./user PID: %d, cpuTime: %ld ns\n", pid,
+//           procControl->processBlock[index].procCpuTime.tv_nsec);
+//    printf("./user PID: %d, runtime: %ld ns\n", pid,
+//           runtime.tv_nsec);
+
+    message.mesg_type = 1;
     message.mesg_pid = pid;
     gettimeofday(&waitStart, NULL);
-    strcpy(message.mesg_text, "PROC_WAIT");
-    wait = true;
+    printf("before wait:\n");
+    printPCBState();
     procControl->processBlock[index].state = 0;
-    printf("./user %d: quantum expired sending WAIT message to ./oss: %s\n", pid, message.mesg_text);
-    if( msgsnd(toMasterID, &message, sizeof(message), 0) == -1){
+    printf("after wait:\n");
+    printPCBState();
+
+    strcpy(message.mesg_text, "PROC_WAIT");
+    printf("./user %d: quantum expired sending WAIT message to ./oss: %s\n",
+           pid, message.mesg_text);
+    if( msgsnd(toMasterID, &message, sizeof(message.mesg_text), IPC_NOWAIT) == -1){
         perror("send_message");
         exit(1);
     }
 
-    while (wait) {
+//    signal( SIGTSTP, catcher );
+//    signal( SIGCONT, catcher );
+//    raise(SIGTSTP);
+//    raise(SIGCONT);
+//    while(pause()){
+//        if(!wait) {
+//            break;
+//        }
+//    }
+    return;
+}
+
+void messageReceive( pid_t pid ){
+
+    int index = findPCBIndex( pid );
+    bool received = false;
         if ((messageStatus = msgrcv(toUserID, &message, sizeof(message),
-                                    pid, 0) >= 0)) {
+                                    message.mesg_type, 0) >= 0)) {
             //receiving PROC_RESUME message from a process
             printf("./user %d: PROC_RESUME message received: %s\n", pid, message.mesg_text);
             if (strcmp(message.mesg_text, "PROC_RESUME") == 0) {
+                //we are handling the case of resume
                 gettimeofday(&waitEnd, NULL);
-                waitDiff = ( waitEnd.tv_usec - waitStart.tv_usec ) * MICROSECOND;
+                waitDiff = (waitEnd.tv_usec - waitStart.tv_usec) * MICROSECOND;
                 procControl->processBlock[index].procWaitTime.tv_nsec += waitDiff;
-                procControl->processBlock[index].procWaitTime.tv_nsec += waitDiff;
-                printf("PID %d: process is resuming...\n", pid);
-                wait = false;
+                procControl->processBlock[index].procSysTime.tv_nsec += waitDiff;
+                procControl->processBlock[index].state = 1;
+                printf("PID %d:process is resuming...\n", pid);
                 //resetting runtime
                 runtime.tv_nsec = 0;
-                procControl->processBlock[index].state = 1;
-                return;
+                received = true;
             }
+//            if (strcmp(message.mesg_text, "PROC_WAIT") == 0) {
+//                //we are handling the case of wait
+//                gettimeofday(&waitStart, NULL);
+//                printf("PID %d:process is waiting...\n", pid);
+//                //resetting runtime
+//                runtime.tv_nsec = 0;
+//            }
             //setting processing flag to false
         } else {
             perror("receive_message");
             exit(1);
         }
-    }
 }
 
 int detachShared(){
