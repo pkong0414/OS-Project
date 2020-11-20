@@ -41,7 +41,7 @@ typedef struct {
 /* Proccess table and sys time shared block */
 typedef struct {
 
-    //we will link both Proc_Resource and PCB by index of the pid.
+    //we will link both Proc_Resource and PCB by index.
     PCB processBlock[18];
     Proc_Resource procResource[18];
 

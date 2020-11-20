@@ -11,14 +11,11 @@ typedef struct {
     int *line;
 } Queue;
 
-//queues global
-//for this project we only need 1 queue for processing requests
-
-//functions
+void createQueues();
 Queue *createQueue(int queueSize);
+void swapQueues();
 void enqueue(Queue *queue, int value);
 int dequeue(Queue *queue);
-
 void printQueue(Queue *queue);
 
 #endif

@@ -24,13 +24,13 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <sys/types.h>
 #include <sys/ipc.h>
+#include <sys/msg.h>
 #include <sys/sem.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <sys/time.h>
-#include <sys/types.h>
-#include <sys/msg.h>
 #include <sys/shm.h>
 #include <signal.h>
 #include <stdbool.h>
@@ -50,13 +50,14 @@
 // structure for message queue
 struct mesg_buffer {
     long mesg_type;
-    pid_t mesg_pid;
     char mesg_text[100];
 } message;
 
 //function prototypes
 void printhelp();
 void initSharedMem();
+void initProcessState();
+void initProcessResources();
 void scheduler();
 int detachShared();
 void initMsgQueue();
@@ -65,8 +66,9 @@ void initProcBlocks();
 void printPCB();
 int findPCBIndex( pid_t pid );
 int printProcessState();
-int queueProcessing( pid_t *currentProcPid );
-void printStatus( pid_t currentProcPid);
+int queueProcessing(pid_t pid, int requestType);
+void printResourceStatus();
+void printStatus();
 
 //output file global
 FILE *outFilePtr1;
@@ -111,12 +113,7 @@ int toUserID;
 int toMasterID;
 
 //queue global
-Queue *resourceRequest;
-Queue *qset1[4];
-Queue *qset2[4];
-Queue *blocked;
-Queue **active;
-Queue **expired;
+static Queue *resourceRequestQ;
 
 
 /* ARGUSED */
@@ -216,11 +213,14 @@ int main( int argc, char ** argv ) {
     char *outPath = "output.log";
 
     //command line parser
-    while ( ( c = getopt(argc, argv, "h" ) ) != -1 ) {
+    while ( ( c = getopt(argc, argv, "hv" ) ) != -1 ) {
         switch (c) {
             case 'h':
                 printhelp();
                 return 0;
+            case'v':
+                verbose = true;
+                break;
             default:
                 break;
         }
@@ -252,7 +252,7 @@ int main( int argc, char ** argv ) {
 
     //initializing process queue
     printf("initializing process queue\n");
-    createQueues();
+    resourceRequestQ = createQueue( 18 );
 
     //initializing process blocks
     printf("initializing process blocks\n");
@@ -260,7 +260,11 @@ int main( int argc, char ** argv ) {
 
     //initializing process states
     printf("initializing process states\n");
-    void initProcessState();
+    initProcessState();
+
+    //initializing resources
+    printf("initializing resources\n");
+    initProcessResources();
 
     //TODO: we'll be making the scheduler create a PCT and one user process (of real time).
     //scheduler will make the process control happen.
@@ -323,15 +327,6 @@ void scheduler() {
     struct timeval nextExecEnd;
     long tDiff;
 
-    long allowedQuantum0 = 10 * MILLISECOND;
-    long allowedQuantum1 = allowedQuantum0 / 2;
-    long allowedQuantum2 = allowedQuantum1 / 2;
-    long allowedQuantum3 =  allowedQuantum2 /2;
-
-    //initializing max time limits for the queues
-    long maxQueueLimit1 = ( 10* MILLISECOND );        //10 ms
-    long maxQueueLimit2 = (( maxQueueLimit1 / 4 ) * 3 );  //2.5 * 3 = 7.5 msg
-
     procControl->sysTime.tv_nsec = 0;
     procControl->inProcess = false;
     //setting up the nanosleep timer
@@ -359,7 +354,7 @@ void scheduler() {
 
         //I think the system time should be kept in nanoseconds and converted accordingly
         //incrementing the system time
-        if( ( processCount < 40 && concurrentProc < 18) && (nextExec.tv_nsec >= MAX_TIME_BETWEEN_NEW_PROCS_NS ) ) {
+        if( (concurrentProc < 18) && (nextExec.tv_nsec >= MAX_TIME_BETWEEN_NEW_PROCS_NS ) ) {
             if( ( index = findEmptyPB() ) != -1 ) {
                 childPid = fork();
                 if (childPid < 0) {
@@ -417,10 +412,7 @@ void scheduler() {
 
                     //this will put the newly exec'd proccess in queue and in wait
                     procControl->processBlock[index].state = 0;
-                    enqueue(resourceRequest, procControl->processBlock[index].pid);
-                    printf("resourceRequest line size: %d\n", resourceRequest->currentSize);
-                    printf("resourceRequest line:\n");
-                    printQueue(resourceRequest);
+                    printf("resourceRequestQ line size: %d\n", resourceRequestQ->currentSize);
                     printProcessState();
 
                     //outputting to file
@@ -443,7 +435,7 @@ void scheduler() {
         }
 
         if ((messageStatus = msgrcv(toMasterID, &message, sizeof(message),
-                                    currentProcPid, 0) > -1)) {
+                                    message.mesg_type, 0) > -1)) {
             printf("./oss: PID: %d, message: %s\n", message.mesg_type, message.mesg_text);
             if (strcmp(message.mesg_text, "PROC_TERM") == 0) {
                 //receiving messages of termination
@@ -451,17 +443,30 @@ void scheduler() {
                 //handle the termination stuff here.
             }
             if (strcmp(message.mesg_text, "REQ_RESOURCE") == 0) {
-                //receiving termination message from a process
+                //receiving resource request message from a process
                 printf("./oss: message received from %d: %s\n", message.mesg_type, message.mesg_text);
                 currentProcPid = message.mesg_type;
                 index = findPCBIndex(currentProcPid);
-                //enqueuing process so we can examine the request.
-                enqueue(resourceRequest, currentProcPid);
-                queueProcessing();
+                //debugging output
+                printf("index: %d\n", index);
+                printf("currentProcPid: %d\n", currentProcPid);
+
+                queueProcessing( currentProcPid , 1 );
+
                 //sending checking in message to master
                 printf("procControl->processBlock[ %d ].queueID: %d\n",
                        index, procControl->processBlock[index].queueID);
                 printStatus();
+            }
+            if (strcmp(message.mesg_text, "REL_RESOURCE") == 0) {
+                //receiving resource release message from a process
+                printf("./oss: message received from %d: %s\n", message.mesg_type, message.mesg_text);
+                currentProcPid = message.mesg_type;
+                index = findPCBIndex(currentProcPid);
+                queueProcessing( currentProcPid , 2 );
+                //sending checking in message to master
+                printf("procControl->processBlock[ %d ].queueID: %d\n",
+                       index, procControl->processBlock[index].queueID);
             }
         }
 
@@ -599,6 +604,14 @@ void initMsgQueue(){
     }
 }
 
+void initProcessResources(){
+    int i;
+    for( i = 0; i < 10; i++){
+        procControl->rSet1.totalResources[i] = 10;
+        procControl->rSet2.totalResources[i] = 10;
+    }
+}
+
 /* Find the next empty proccess block. Returns proccess block position if one is available or -1 if one is not */
 int findEmptyPB(){
     int i;
@@ -660,29 +673,39 @@ int printProcessState(){
     return clear;
 }
 
-int queueProcessing() {
+int queueProcessing( pid_t pid , int requestType ) {
     //this queue will perform banker's algorithm
+
+    //this will consist of request types
+    //any requestType not 1 will not be asking to enqueue the pid.
+    //enqueuing pid first before we handle request
+    printf("inside queueProcessing\n");
+
+    printResourceStatus();
     pid_t currentProcPid;
     int count = 0;
     int dequeueResult;
-    int indexPid;                           //this will hold the index of the pid
+    int index;                           //this will hold the index of the pid
     int resourceIndex;                      //this will hold the index of the resource requested
     int resourceRequestActual1;             //this will hold the value requested of the first resource set
     int resourceRequestActual2;             //this will hold the value requested of the second resource set
-    printf("inside queueProcessing");
     printStatus();
     int requestResult1;
     int requestResult2;
 
+    if(requestType == 1) {
+        printf("enqueuing %d into resourceRequestQ\n", pid);
+        enqueue(resourceRequestQ, pid);
+    }
     //this will handle the case of terminated process
     //as well as cases of empty queues.
-    while( count < queue->currentSize ) {
+    while( count < resourceRequestQ->currentSize ) {
         printf("./oss: checking queues now\n");
         //we'll need to communicate with sharedMem in order to figure out which processes can proceed.
 
 
         //we'll need to dequeue the process first then apply banker's algorithm
-        if (((dequeueResult = dequeue(resourceRequest)) == -1)) {
+        if (((dequeueResult = dequeue(resourceRequestQ)) == -1)) {
             printf("there's nothing in queue 0\n");
             return 0;
         } else {
@@ -690,27 +713,29 @@ int queueProcessing() {
             currentProcPid = dequeueResult;
 
             //we've found a process to dequeue so we'll apply it here
-            indexPid = findPCBIndex(currentProcPid);
-            resourceIndex = findResourceRequestIndex(indexPid);
+            index = findPCBIndex(currentProcPid);
+            resourceIndex = findResourceRequestIndex(index);
             if (resourceIndex == -1) {
                 //error case, where we have a process sitting in queue that isn't requesting
                 //for any resources.
                 printf("ERROR: a process has been enqueued and isn't asking for any resources\n");
                 exit(1);
             }
-            resourceRequestActual = procControl->procResource[indexResult].request[resourceIndex]
-                                    - procControl->procResource[indexResult].allocated[resourceIndex];
+            //we might not have to subtract request - allocate since bounds are determined
+            //by the user process
+            resourceRequestActual1 = procControl->procResource[index].request[resourceIndex];
 
-            //
+            //trying to see if there's enough resources to grant to a process
             requestResult1 = procControl->rSet1.totalResources[resourceIndex]
-                            - resourceRequestActual1;
+                    - resourceRequestActual1;
+
             if (requestResult1 >= 0) {
                 //this means we have enough resources. Let's get this process going.
                 printf("./oss: there's enough resources for this process, sending APPROVE message to PID: %d\n",
-                       pid);
+                       currentProcPid);
+                message.mesg_type = (long)currentProcPid;
                 strcpy(message.mesg_text, "APPROVE");
-                message.mesg_type = pid;
-                printf("./oss: sending pid:%d message: %s\n", pid, message.mesg_text);
+                printf("./oss: sending pid:%d message: %s\n", currentProcPid, message.mesg_text);
                 //sending APPROVE message to ./user
 
                 //taking resources away from system resources
@@ -718,11 +743,11 @@ int queueProcessing() {
                 -= resourceRequestActual1;
 
                 //we should also allocate the resources to that said process
-                procControl->procResource[indexResult].allocated[resourceIndex][0]
-                += procControl->procResource[indexResult].request[resourceIndex];
+                procControl->procResource[index].allocated[resourceIndex][0]
+                += procControl->procResource[index].request[resourceIndex];
 
                 //resource has been distributed. Let's reset the request
-                procControl->procResource[indexResult].request[resourceIndex] = 0;
+                procControl->procResource[index].request[resourceIndex] = 0;
 
                 if (msgsnd(toUserID, &message, sizeof(message), 0) == -1) {
                     perror("send_message");
@@ -736,10 +761,10 @@ int queueProcessing() {
                 if (requestResult2 >= 0) {
                     //looks like second set of resource type can cover. Let's get this process going.
                     printf("./oss: there's enough resources for this process, sending APPROVE message to PID: %d\n",
-                           pid);
+                           currentProcPid);
+                    message.mesg_type = (long)currentProcPid;
                     strcpy(message.mesg_text, "APPROVE");
-                    message.mesg_type = pid;
-                    printf("./oss: sending pid:%d tellProcessResume message: %s\n", pid, message.mesg_text);
+                    printf("./oss: sending pid:%d tellProcessResume message: %s\n", currentProcPid, message.mesg_text);
                     //sending APPROVE message to ./user
 
                     //taking resources away from system resources
@@ -755,15 +780,15 @@ int queueProcessing() {
                             -= resourceRequestActual2;
 
                     //we should also allocate the resources to that said process
-                    procControl->procResource[indexResult].allocated[resourceIndex][0] +=
-                            ( procControl->procResource[indexResult].request[resourceIndex]
+                    procControl->procResource[index].allocated[resourceIndex][0] +=
+                            ( procControl->procResource[index].request[resourceIndex]
                             + requestResult1 );
                     //adding to allocated SysResources set 2 now
-                    procControl->procResource[indexResult].allocated[resourceIndex][1] +=
+                    procControl->procResource[index].allocated[resourceIndex][1] +=
                             ( resourceRequestActual2 );
 
                     //resource has been distributed. Let's reset the request
-                    procControl->procResource[indexResult].request[resourceIndex] = 0;
+                    procControl->procResource[index].request[resourceIndex] = 0;
 
                     if (msgsnd(toUserID, &message, sizeof(message), 0) == -1) {
                         perror("send_message");
@@ -774,8 +799,8 @@ int queueProcessing() {
                     //process will have to wait till more resources have opened up.
                     printf("There isn't enough resources. Unsafe state from resource request: DENIED.\n");
                     printf("Enqueuing process: %d\n", currentProcPid);
-                    enqueue(resourceRequest, currentProcPid);
-                    printQueue(resourceRequest);
+                    enqueue(resourceRequestQ, currentProcPid);
+                    printQueue(resourceRequestQ);
                 }
             }
         }
@@ -787,13 +812,42 @@ int queueProcessing() {
 void printStatus() {
     printProcessState();
     printf( "resourceRequest: \n");
-    printQueue( resourceRequest );
+    printQueue( resourceRequestQ );
 
 }
 
 void printResourceStatus() {
     //This should print the resources status currently used by all the processes
-
+    int i;
+    int procIndex;
+    printf("Total Resources: \n");
+    for(i = 0; i < 10; i++) {
+        printf("%d ", i);
+    }
+    printf("\n");
+    for(i = 0; i < 10; i++){
+        printf( "%d ", procControl->rSet1.totalResources[i]);
+    }
+    printf("\n");
+    for(i = 0; i < 10; i++){
+        printf( "%d ", procControl->rSet2.totalResources[i]);
+    }
+    printf("\n\n");
+    for(procIndex = 0; procIndex < 18; procIndex++) {
+        if( procControl->processBlock[procIndex].pid > 0) {
+            printf("Proc %d allocated: \n", procControl->processBlock[procIndex].pid);
+            //first set of allocation
+            for (i = 0; i < 10; i++) {
+                printf("%d ", procControl->procResource[procIndex].allocated[i][0]);
+            }
+            printf("\n");
+            //second set of allocation
+            for (i = 0; i < 10; i++) {
+                printf("%d ", procControl->procResource[procIndex].allocated[i][2]);
+            }
+            printf("\n");
+        }
+    }
 
 }
 
@@ -804,7 +858,7 @@ int findResourceRequestIndex( int index ) {
 
     //we are only looking through the request from Proc_Resource
     for( i; i < 10; i++){
-        if( procControl.procResource[index].request[i] > 0){
+        if( procControl->procResource[index].request[i] > 0){
             return i;
         }
     }

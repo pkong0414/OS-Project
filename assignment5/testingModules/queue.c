@@ -8,6 +8,25 @@
 //macro for max size
 #define MAXSIZE 18
 
+//queue global
+Queue *resourceRequestQ;
+Queue *qset1[4];
+Queue *qset2[4];
+Queue *blocked;
+Queue **active;
+Queue **expired;
+
+void createQueues() {
+    int i;
+    for( i = 0; i < 4; i++){
+        qset1[i] = createQueue( 18 );
+        qset2[i] = createQueue( 18 );
+    }
+    blocked = createQueue(18);
+    active = qset1;
+    expired = qset2;
+}
+
 Queue* createQueue(int queueSize)
 {
     Queue* queue = (Queue*) malloc(sizeof(Queue));
@@ -49,8 +68,6 @@ void enqueue(Queue *queue, int value) {
 
 int dequeue(Queue *queue)
 {
-    printf("inside dequeue function\n");
-    printQueue( queue );
     if (queue->currentSize <= 0)
         return -1;
     int item = queue->line[queue->front];
@@ -59,33 +76,35 @@ int dequeue(Queue *queue)
     return item;
 }
 
+void swapQueues() {
+    Queue **temp = active;
+    active = expired;
+    expired = temp;
+}
+
 void printQueue(Queue *queue) {
     int i;
     int count = 0;
-    if( queue->currentSize > 0) {
-        if (queue->front > queue->rear) {
-            //this will consider the circular case
-            for (i = queue->front; i < MAXSIZE; i++) {
-                printf("%d ", queue->line[i]);
-                count++;
-            }
-            //now we will print the end of the loop
-            for (i = queue->rear; count < queue->currentSize; i++) {
-                printf("%d ", queue->line[i]);
-                count++;
-            }
-        } else {
-            for (i = queue->front; i <= queue->rear; ++i) {
-                printf("%d ", queue->line[i]);
-            }
+    if( queue->front > queue->rear ){
+        //this will consider the circular case
+        for(i = queue->front; i < MAXSIZE; i++) {
+            printf("%d ", queue->line[i]);
+            count++;
+        }
+        //now we will print the end of the loop
+        for(i = queue->rear; count < queue->currentSize; i++) {
+            printf("%d ", queue->line[i]);
+            count++;
         }
     } else {
-        printf("The queue is empty...\n");
+        for (i = queue->front; i <= queue->rear; ++i) {
+            printf("%d ", queue->line[i]);
+        }
     }
     printf("\n");
 }
 
-/*********************  testing purpose only *****************************
+/*********************  testing purpose only *****************************/
 void main() {
     createQueues();
     int i = 3;
@@ -104,11 +123,11 @@ void main() {
     printf("Expired queue %d before swap => ", i);
     printQueue(resourceRequestQ);
     swapQueues();
-    printf( "Dequeuing %d from active...\n", dequeue( resourceRequestQ );
+    printf( "Dequeuing %d from active...\n", dequeue( resourceRequestQ) );
     printf("Active queue %d after swap => ", i);
     printQueue(resourceRequestQ);
     printf("Expired queue %d after swap => ", i);
     printQueue(resourceRequestQ);
 }
 
-*************************************************************************/
+/*************************************************************************/

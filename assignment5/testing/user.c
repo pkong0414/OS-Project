@@ -2,10 +2,10 @@
 
 #include "sharedMemory.h"
 #include "detachandremove.h"
-#include "queue.h"
+#include <sys/types.h>
+#include <sys/ipc.h>
 #include <sys/msg.h>
 #include <sys/shm.h>
-#include <sys/ipc.h>
 #include <sys/stat.h>
 #include <stdio.h>
 #include <stdbool.h>
@@ -28,13 +28,15 @@ int findPCBIndex( int myPid );
 void initSharedMem();
 void initMsgQueue();
 void initMaxClaim( int index );
-void processWait( int pid );
+void printMaxClaim( int index );
+void resourceRequest( pid_t pid );
+void resourceRelease( pid_t pid );
+int resourceCheck(int index);
 int detachShared();
 
 // structure for message queue
 struct mesg_buffer {
     long mesg_type;
-    pid_t mesg_pid;
     char mesg_text[100];
 } message;
 
@@ -111,13 +113,15 @@ int main( int argc, char** argv ) {
         exit( 1 );
     }
     initMaxClaim( index );
+    printMaxClaim( index );
     int priorityID = procControl->processBlock[index].queueID;
     struct timeval tStart, tEnd, tCurrentStart, tCurrentEnd;
     long tDifference;
     int queueProcessResult;
     long maxTime = MAXCPUTIME;
-    int termPercent;
+    int termPercent = 90;
     int requestBound;
+    int releasePercent = 45;
 
     //getting time for start.
     gettimeofday(&tStart, NULL);
@@ -137,7 +141,6 @@ int main( int argc, char** argv ) {
             printf("Terminating userPid: %d\n", userPid);
             strcpy(message.mesg_text, "PROC_TERM");
             message.mesg_type = userPid;
-            message.mesg_pid = userPid;
             //sending terminate message to master
             if( msgsnd(toMasterID, &message, sizeof(message), 0) == -1){
                 perror("send_message");
@@ -167,23 +170,40 @@ int main( int argc, char** argv ) {
             printf("./user PID: %d, sysTime: %ld ns\n", userPid,
                    procControl->processBlock[index].procSysTime.tv_nsec);
             exit(14);
-        } else if (diceRoll >= 0 && diceRoll < termPercent) {
-            //the case of just processing
-
-            gettimeofday( &runtimeEnd, NULL );
-            runtimeDiff = (runtimeEnd.tv_usec - runtimeStart.tv_usec) * MICROSECOND;
-            runtime.tv_nsec += runtimeDiff;
-            procControl->processBlock[index].procSysTime.tv_nsec += runtimeDiff;
-            procControl->processBlock[index].procCpuTime.tv_nsec += runtimeDiff;
-
-            printf("number is: %d. Processing...\n", diceRoll);
-            printf("./user PID: %d, cpuTime: %ld ns\n", userPid,
-                   procControl->processBlock[index].procCpuTime.tv_nsec);
-            printf("./user runtime nanosecs: %d\n", runtime.tv_nsec);
-            if( runtime.tv_nsec >= processQuantum ) {
-                processWait(userPid);
+        } else if (diceRoll >= releasePercent && diceRoll < termPercent) {
+            //the case of requesting resources
+            resourceRequest( userPid );
+        } else if (diceRoll >= 0 && diceRoll < releasePercent) {
+            //the case of releasing resources
+            if( resourceCheck(index) == 1 ) {
+                resourceRelease( userPid );
+            } else {
+                printf("no resources allocated. Making resource request Instead\n");
+                resourceRequest( userPid );
             }
         }
+
+        //if we don't get APPROVE, we'll be sitting in wait till we get what we need.
+        if ((messageStatus = msgrcv(toUserID, &message, sizeof(message), userPid, 0) > -1)) {
+            //receiving PROC_RESUME message from a process
+            printf("./user %d: APPROVE message received: %s\n", message.mesg_type, message.mesg_text);
+            if (strcmp(message.mesg_text, "APPROVE") == 0) {
+                printf("PID %d: process ...\n", message.mesg_type);
+                //resetting runtime
+                runtime.tv_nsec = 0;
+                procControl->processBlock[index].state = 1;
+                return;
+            }
+            //setting processing flag to false
+        } else {
+            perror("receive_message");
+        }
+
+        gettimeofday( &runtimeEnd, NULL );
+        runtimeDiff = (runtimeEnd.tv_usec - runtimeStart.tv_usec) * MICROSECOND;
+        runtime.tv_nsec += runtimeDiff;
+        procControl->processBlock[index].procSysTime.tv_nsec += runtimeDiff;
+        procControl->processBlock[index].procCpuTime.tv_nsec += runtimeDiff;
     }
 }
 
@@ -257,14 +277,33 @@ void initMsgQueue(){
 
 void initMaxClaim( int index ){
     //seeding RNG
-    srand(time(0));
     int dice;
     int r;
     for(r = 0; r < 10 ; r++){
         dice = ( rand() % 20 );
         procControl->procResource[ index ].maxClaim[r] = dice;
     }
+}
 
+void printMaxClaim( int index ){
+    int i;
+    printf("maxClaim: \n");
+    for( i = 0; i < 10; i++){
+        printf("%d ", procControl->procResource[ index ].maxClaim[i]);
+    }
+    printf("\n");
+}
+
+void printAllocate( int index ){
+    int i;
+    printf("allocate resourceType: %d;");
+    for(i = 0; i < 10; i++){
+        printf("%d ", procControl->procResource[ index ].allocated[i][0]);
+    }
+    printf("\n");
+    for(i = 0; i < 10; i++){
+        printf("%d ", procControl->procResource[ index ].allocated[i][1]);
+    }
 }
 
 //function for finding pid from the PCB in the PCT
@@ -287,40 +326,120 @@ int findPCBIndex( pid_t myPid ){
     return -1;
 }
 
-void processWait( pid_t pid ) {
+void resourceRequest( pid_t pid ){
     int index = findPCBIndex(pid);
-    int priorityID = procControl->processBlock[index].queueID;
-    printf("./user priorityID: %d\n", priorityID);
+    int resourceType;
+    int resourceBound;
+    int totalAllocated;
+    int amountRequested;
+    bool waiting;
 
-    //we are now going to wait because our quantum expired
-    message.mesg_type = pid;
-    message.mesg_pid = pid;
-    gettimeofday(&waitStart, NULL);
-    strcpy(message.mesg_text, "PROC_WAIT");
-    wait = true;
+    //rolling to see which resource type to request
+    resourceType = (rand() % 10);
+
+    //getting the total allocated amount from both resource sets
+    totalAllocated = procControl->procResource[index].allocated[resourceType][0] +
+                     procControl->procResource[index].allocated[resourceType][1];
+    //calculating the resource bound now
+    resourceBound = procControl->procResource[index].maxClaim[resourceType] -
+                    totalAllocated;
+
+    //randomly generating resource request amount
+    amountRequested = ( (rand() % resourceBound) + 1 );
+    //assigning amountRequested to shared memory
+    procControl->procResource[index].request[resourceType] = amountRequested;
+
+    //debugging output
+    printf("./user resourceType: %d\n", resourceType);
+    printf("./user maxClaim: %d\n", procControl->procResource[index].maxClaim[resourceType]);
+    printf("./user allocated set1: %d\n",procControl->procResource[index].allocated[resourceType][0]);
+    printf("./user allocated set2: %d\n",procControl->procResource[index].allocated[resourceType][1]);
+    printf("./user amountRequested: %d\n", amountRequested);
+    printf("./user resourceBound: %d\n", resourceBound);
+
+    message.mesg_type = (long)pid;
+    strcpy(message.mesg_text, "REQ_RESOURCE");
     procControl->processBlock[index].state = 0;
-    printf("./user %d: quantum expired sending WAIT message to ./oss: %s\n", pid, message.mesg_text);
+    waiting = true;
+    printf("./user %d: sending REQ_RESOURCE message to ./oss: %s\n", pid, message.mesg_text);
+    if (msgsnd(toMasterID, &message, sizeof(message), 0) == -1) {
+        perror("send_message");
+    }
+}
+
+void resourceRelease( pid_t pid ) {
+    int index = findPCBIndex(pid);
+    //this function will release resources atleast one or more.
+    printf("releasing resources...\n");
+    int diceRoll;
+    int amountRelease;
+    bool finished = false;      //this will be true when one resource has been released
+    int r;
+    int s;
+    while( !finished ) {
+        //this is in the case that we really haven't released any resources (highly unlikely)
+        for (r = 0; r < 10; r++) {
+            if (procControl->procResource[index].allocated[r][0] > 0 ||
+                procControl->procResource[index].allocated[r][1] > 0) {
+                //this means there's resources to release else we move on.
+
+                //we'll be randomly rolling to see if the resources can be released
+                diceRoll = (rand() % 2);
+                if (diceRoll == 1) {
+                    if (procControl->procResource[index].allocated[r][0] > 0) {
+                        amountRelease = (rand() % procControl->procResource[index].allocated[r][0]) + 1;
+                        procControl->procResource[index].allocated[r][0] -= amountRelease;
+                        printf("%d is released from released resource: %d from system resource set: %d\n",
+                               amountRelease, r, 1);
+
+                        //now resources is released, let's feed it back into SysResources
+                        procControl->rSet1.totalResources[r] += amountRelease;
+
+                        //now we can mark the flag for true
+                        finished = true;
+                    }
+                    if (procControl->procResource[index].allocated[r][1] > 0) {
+                        amountRelease = (rand() % procControl->procResource[index].allocated[r][1]) + 1;
+                        procControl->procResource[index].allocated[r][1] -= amountRelease;
+                        printf("%d is released from resourceType: %d from system resource set: %d\n",
+                               amountRelease, r, 2);
+
+                        //now resources is released, let's feed it back into SysResources
+                        procControl->rSet2.totalResources[r] += amountRelease;
+
+                        //now we can mark the flag for true
+                        finished = true;
+                    }
+                }
+            }
+        }
+
+    }
+
+    //since we just released some resources let's send a message back to the ./oss
+
+    message.mesg_type = pid;
+    strcpy(message.mesg_text, "REL_RESOURCE");
+    procControl->processBlock[index].state = 0;
+    printf("./user %d: sending REL_RESOURCE message to ./oss: %s\n", pid, message.mesg_text);
     if (msgsnd(toMasterID, &message, sizeof(message), 0) == -1) {
         perror("send_message");
         exit(1);
     }
-    if ((messageStatus = msgrcv(toUserID, &message, sizeof(message),
-                                pid, 0) >= 0)) {
-        //receiving PROC_RESUME message from a process
-        printf("./user %d: PROC_RESUME message received: %s\n", pid, message.mesg_text);
-        if (strcmp(message.mesg_text, "APPROVE") == 0) {
-            printf("PID %d: process ...\n", pid);
-            //resetting runtime
-            runtime.tv_nsec = 0;
-            procControl->processBlock[index].state = 1;
-            
-            return;
+}
+
+int resourceCheck(int index){
+    int i;
+    for( i = 0; i < 10; i++){
+        if( procControl->procResource[index].allocated[i][0] > 0){
+            return 1;
         }
-        //setting processing flag to false
-    } else {
-        perror("receive_message");
-        exit(1);
+        if( procControl->procResource[index].allocated[i][2] > 0){
+            return 1;
+        }
     }
+    //if we don't find any resources allocated
+    return -1;
 }
 
 int detachShared(){
