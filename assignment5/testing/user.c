@@ -142,15 +142,6 @@ int main( int argc, char** argv ) {
             //termination works, so now we'll disable this to get scheduling with the queue working.
             //the case of termination
             printf("Terminating userPid: %d\n", userPid);
-            strcpy(message.mesg_text, "PROC_TERM");
-            message.mesg_type = 1;
-            message.mesg_pid = userPid;
-            //sending terminate message to master
-            if( msgsnd(toMasterID, &message, sizeof(message), 0) == -1){
-                perror("send_message");
-                exit(1);
-            }
-            printf("./user: TERMINATE message sent...\n");
 
             gettimeofday(&tEnd, NULL);
 
@@ -173,6 +164,18 @@ int main( int argc, char** argv ) {
                    procControl->processBlock[index].procCpuTime.tv_nsec);
             printf("./user PID: %d, sysTime: %ld ns\n", userPid,
                    procControl->processBlock[index].procSysTime.tv_nsec);
+
+//            strcpy(message.mesg_text, "PROC_TERM");
+//            message.mesg_type = 1;
+//            message.mesg_pid = userPid;
+//
+//            //sending terminate message to master
+//            if( msgsnd(toMasterID, &message, sizeof(message), 0) == -1){
+//                perror("send_message");
+//                exit(1);
+//            }
+            printf("./user: Process terminating...\n");
+
             exit(14);
         } else if (diceRoll >= releasePercent && diceRoll < termPercent) {
             //the case of requesting resources
@@ -365,6 +368,7 @@ void resourceRequest( pid_t pid ){
         //resetting runtime
         runtime.tv_nsec = 0;
         procControl->processBlock[index].state = 1;
+        return;
     }
 }
 

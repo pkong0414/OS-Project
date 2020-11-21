@@ -128,6 +128,11 @@ static void myhandler( int s ) {
     errno = errsave;
     int i;
 
+    //waiting for max amount of children to terminate
+    for (i = 0; i <= maxChildren ; ++i) {
+        wait(NULL);
+    }
+
     //detaching shared memory
     if( detachShared() == 0 ) {
         printf( "./oss: everything is finished... exiting program\n");
@@ -438,11 +443,11 @@ void scheduler() {
         if ((messageStatus = msgrcv(toMasterID, &message, sizeof(message),
                                     message.mesg_type, 0) > -1)) {
             printf("./oss: PID: %d, message type: %d, message: %s\n", message.mesg_pid, message.mesg_type, message.mesg_text);
-            if (strcmp(message.mesg_text, "PROC_TERM") == 0) {
-                //receiving messages of termination
-                printf("./oss PID: %d has terminated!\n", message.mesg_pid);
-                //handle the termination stuff here.
-            }
+//            if (strcmp(message.mesg_text, "PROC_TERM") == 0) {
+//                //receiving messages of termination
+//                printf("./oss PID: %d has terminated!\n", message.mesg_pid);
+//                //handle the termination stuff here.
+//            }
             if (strcmp(message.mesg_text, "REQ_RESOURCE") == 0) {
                 //receiving resource request message from a process
                 printf("./oss: message received from %d: %s\n", message.mesg_pid, message.mesg_text);
@@ -478,7 +483,7 @@ void scheduler() {
         pid_t pid;
 
         /**************************** PROCESS TERMINATION ****************************/
-        if ((pid = waitpid((pid_t) -0, &status, WNOHANG)) > 0) {
+        if ((pid = waitpid((pid_t) -1, &status, WNOHANG)) > 0) {
             //if a PID is returned meaning the child died
 
             if (WIFEXITED(status)) {
