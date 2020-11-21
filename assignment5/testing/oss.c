@@ -48,7 +48,8 @@
 #define MICROSECOND 1000
 
 // structure for message queue
-struct mesg_buffer {
+static struct mesg_buffer {
+    pid_t mesg_pid;
     long mesg_type;
     char mesg_text[100];
 } message;
@@ -436,16 +437,16 @@ void scheduler() {
 
         if ((messageStatus = msgrcv(toMasterID, &message, sizeof(message),
                                     message.mesg_type, 0) > -1)) {
-            printf("./oss: PID: %d, message: %s\n", message.mesg_type, message.mesg_text);
+            printf("./oss: PID: %d, message type: %d, message: %s\n", message.mesg_pid, message.mesg_type, message.mesg_text);
             if (strcmp(message.mesg_text, "PROC_TERM") == 0) {
                 //receiving messages of termination
-                printf("./oss PID: %d has terminated!\n", message.mesg_type);
+                printf("./oss PID: %d has terminated!\n", message.mesg_pid);
                 //handle the termination stuff here.
             }
             if (strcmp(message.mesg_text, "REQ_RESOURCE") == 0) {
                 //receiving resource request message from a process
-                printf("./oss: message received from %d: %s\n", message.mesg_type, message.mesg_text);
-                currentProcPid = message.mesg_type;
+                printf("./oss: message received from %d: %s\n", message.mesg_pid, message.mesg_text);
+                currentProcPid = message.mesg_pid;
                 index = findPCBIndex(currentProcPid);
                 //debugging output
                 printf("index: %d\n", index);
@@ -460,8 +461,8 @@ void scheduler() {
             }
             if (strcmp(message.mesg_text, "REL_RESOURCE") == 0) {
                 //receiving resource release message from a process
-                printf("./oss: message received from %d: %s\n", message.mesg_type, message.mesg_text);
-                currentProcPid = message.mesg_type;
+                printf("./oss: message received from %d: %s\n", message.mesg_pid, message.mesg_text);
+                currentProcPid = message.mesg_pid;
                 index = findPCBIndex(currentProcPid);
                 queueProcessing( currentProcPid , 2 );
                 //sending checking in message to master
@@ -536,7 +537,7 @@ void scheduler() {
         if( concurrentProc < 1) {
             nextExec.tv_nsec = MAX_TIME_BETWEEN_NEW_PROCS_NS;
         }
-        if(processCount == 100){
+        if(processCount == 40){
             myhandler(1);
             exit(0);
         }
@@ -733,9 +734,11 @@ int queueProcessing( pid_t pid , int requestType ) {
                 //this means we have enough resources. Let's get this process going.
                 printf("./oss: there's enough resources for this process, sending APPROVE message to PID: %d\n",
                        currentProcPid);
-                message.mesg_type = (long)currentProcPid;
+                message.mesg_type = currentProcPid+2;
+                message.mesg_pid = currentProcPid;
                 strcpy(message.mesg_text, "APPROVE");
-                printf("./oss: sending pid:%d message: %s\n", currentProcPid, message.mesg_text);
+                //printf("./oss: sending pid:%d message: %s. messageType: %d\n", currentProcPid, message.mesg_text,
+                       //message.mesg_type);
                 //sending APPROVE message to ./user
 
                 //taking resources away from system resources
@@ -751,7 +754,6 @@ int queueProcessing( pid_t pid , int requestType ) {
 
                 if (msgsnd(toUserID, &message, sizeof(message), 0) == -1) {
                     perror("send_message");
-                    exit(1);
                 }
             } else if (requestResult1 < 0) {
                 //we are dipping into the second set of resources.
@@ -762,9 +764,11 @@ int queueProcessing( pid_t pid , int requestType ) {
                     //looks like second set of resource type can cover. Let's get this process going.
                     printf("./oss: there's enough resources for this process, sending APPROVE message to PID: %d\n",
                            currentProcPid);
-                    message.mesg_type = (long)currentProcPid;
+                    message.mesg_type = currentProcPid+2;
+                    message.mesg_pid = currentProcPid;
                     strcpy(message.mesg_text, "APPROVE");
-                    printf("./oss: sending pid:%d tellProcessResume message: %s\n", currentProcPid, message.mesg_text);
+                    //printf("./oss: sending pid:%d message: %s. messageType: %d\n", currentProcPid, message.mesg_text,
+                           //message.mesg_type);
                     //sending APPROVE message to ./user
 
                     //taking resources away from system resources
@@ -792,7 +796,6 @@ int queueProcessing( pid_t pid , int requestType ) {
 
                     if (msgsnd(toUserID, &message, sizeof(message), 0) == -1) {
                         perror("send_message");
-                        exit(1);
                     }
                 } else {
                     //we cannot cover the resource expenditure

@@ -35,7 +35,8 @@ int resourceCheck(int index);
 int detachShared();
 
 // structure for message queue
-struct mesg_buffer {
+static struct mesg_buffer {
+    pid_t mesg_pid;
     long mesg_type;
     char mesg_text[100];
 } message;
@@ -56,7 +57,6 @@ key_t userKey;
 key_t masterKey;
 int toUserID;
 int toMasterID;
-int messageStatus;
 
 //shared memory section
 key_t myKey;
@@ -91,11 +91,11 @@ static int setupUserInterrupt( void ){
 }
 
 int main( int argc, char** argv ) {
-
-    if( setupUserInterrupt() == -1 ){
-        perror( "./user: failed to set up a user kill signal.\n");
-        return 1;
-    }
+//
+//    if( setupUserInterrupt() == -1 ){
+//        perror( "./user: failed to set up a user kill signal.\n");
+//        return 1;
+//    }
 
     procControl = (sharedMem *)malloc(sizeof(sharedMem));
 
@@ -135,12 +135,16 @@ int main( int argc, char** argv ) {
         //we'll just keep rolling the dice till we get terminate
         diceRoll = (rand() % 100);
         printf("rolled number: %d\n", diceRoll);
+
+
+
         if ((procControl->processBlock[index].procCpuTime.tv_nsec >= maxTime) || diceRoll >= termPercent ) {
             //termination works, so now we'll disable this to get scheduling with the queue working.
             //the case of termination
             printf("Terminating userPid: %d\n", userPid);
             strcpy(message.mesg_text, "PROC_TERM");
-            message.mesg_type = userPid;
+            message.mesg_type = 1;
+            message.mesg_pid = userPid;
             //sending terminate message to master
             if( msgsnd(toMasterID, &message, sizeof(message), 0) == -1){
                 perror("send_message");
@@ -181,22 +185,6 @@ int main( int argc, char** argv ) {
                 printf("no resources allocated. Making resource request Instead\n");
                 resourceRequest( userPid );
             }
-        }
-
-        //if we don't get APPROVE, we'll be sitting in wait till we get what we need.
-        if ((messageStatus = msgrcv(toUserID, &message, sizeof(message), userPid, 0) > -1)) {
-            //receiving PROC_RESUME message from a process
-            printf("./user %d: APPROVE message received: %s\n", message.mesg_type, message.mesg_text);
-            if (strcmp(message.mesg_text, "APPROVE") == 0) {
-                printf("PID %d: process ...\n", message.mesg_type);
-                //resetting runtime
-                runtime.tv_nsec = 0;
-                procControl->processBlock[index].state = 1;
-                return;
-            }
-            //setting processing flag to false
-        } else {
-            perror("receive_message");
         }
 
         gettimeofday( &runtimeEnd, NULL );
@@ -332,6 +320,7 @@ void resourceRequest( pid_t pid ){
     int resourceBound;
     int totalAllocated;
     int amountRequested;
+    int messageStatus;
     bool waiting;
 
     //rolling to see which resource type to request
@@ -357,13 +346,25 @@ void resourceRequest( pid_t pid ){
     printf("./user amountRequested: %d\n", amountRequested);
     printf("./user resourceBound: %d\n", resourceBound);
 
-    message.mesg_type = (long)pid;
+    message.mesg_pid = pid;
+    message.mesg_type = 1;
     strcpy(message.mesg_text, "REQ_RESOURCE");
     procControl->processBlock[index].state = 0;
     waiting = true;
     printf("./user %d: sending REQ_RESOURCE message to ./oss: %s\n", pid, message.mesg_text);
     if (msgsnd(toMasterID, &message, sizeof(message), 0) == -1) {
         perror("send_message");
+    }
+
+    //if we don't get APPROVE, we'll be sitting in wait till we get what we need.
+    msgrcv(toUserID, &message, sizeof(message), pid, 0);
+    //receiving PROC_RESUME message from a process
+    if (strcmp(message.mesg_text, "APPROVE") == 0) {
+        printf("./user %d: APPROVE message received: %s\n", message.mesg_pid, message.mesg_text);
+        printf("PID %d: process ...\n", message.mesg_type);
+        //resetting runtime
+        runtime.tv_nsec = 0;
+        procControl->processBlock[index].state = 1;
     }
 }
 
@@ -417,8 +418,8 @@ void resourceRelease( pid_t pid ) {
     }
 
     //since we just released some resources let's send a message back to the ./oss
-
-    message.mesg_type = pid;
+    message.mesg_pid = pid;
+    message.mesg_type = 1;
     strcpy(message.mesg_text, "REL_RESOURCE");
     procControl->processBlock[index].state = 0;
     printf("./user %d: sending REL_RESOURCE message to ./oss: %s\n", pid, message.mesg_text);

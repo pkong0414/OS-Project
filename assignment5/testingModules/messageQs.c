@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <sys/ipc.h>
 #include <sys/msg.h>
+#include <string.h>
 
 // structure for message queue
 struct mesg_buffer {
@@ -12,21 +13,27 @@ struct mesg_buffer {
 int main()
 {
     key_t key;
-    int msgid;
+    int msgToR;
+    int msgToQ;
 
     // ftok to generate unique key
     key = ftok("progfile", 65);
 
     // msgget creates a message queue
     // and returns identifier
-    msgid = msgget(key, 0666 | IPC_CREAT);
+    msgToR = msgget(key, 0666 | IPC_CREAT);
+    msgToQ = msgget(key, 0666 | IPC_CREAT);
     message.mesg_type = 1;
 
     printf("Write Data : ");
     gets(message.mesg_text);
 
     // msgsnd to send message
-    msgsnd(msgid, &message, sizeof(message), 0);
+    msgsnd(msgToR, &message, sizeof(message), 0);
+    msgrcv(msgToQ, &message, sizeof(message), 2, 0);
+    if( strcmp(message.mesg_text, "REPLYING") == 0){
+        printf("messageR received my message.\n");
+    }
 
     // display the message
     printf("Data send is : %s \n", message.mesg_text);
